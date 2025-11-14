@@ -1,4 +1,5 @@
-# when you just download the NPI data, it is necessary to look into the data and see what's in there. However, the file is too big to be opened in Excel and SQL, you can create a 1000-row sample with Python. 
+# When you just download the NPI data, it is necessary to look into the data and see what's in there. However, the file is too big to be opened in Excel and SQL, you can create a 1000-row sample with Python. 
+# It would be helpful to reference the official file "NPPES Data Dissemination - Code Values" for all the codes in the file.
 
 import pandas as pd
 import os
