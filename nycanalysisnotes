@@ -1,0 +1,68 @@
+# Analyze data in NYC 5 boroughs with different metrics 
+
+File path:C:/Users/Yueming Zhao/Desktop/Outpatient Neuropsychological Assessment Program/NPPES_Data_Dissemination_November_2025_V2/nyc_5_boroughs_complete.csv
+
+When any of the columns Healthcare Provider Taxonomy Code_1 (through 15) has the following code: 
+
+103G00000X 
+
+It means "Clinical Neuropsychologist"
+
+Among all the Clinical Neuropsychologists, calculate the following metrics: 
+
+1. How many Clinical Neuropsychologists are individuals and organizations 
+
+Individual: Entity Type Code = 1
+Organization: Entity Type Code = 2
+
+2. How many individual Clinical Neuropsychologists and organizations with Clinical Neuropsychologists are in each borough (based on the zip codes you had in the last script)
+
+3. Among the individual Clinical Neuropsychologists, how many are Sole Proprietors and not a Sole Proprietor?
+
+Individual: Entity Type Code = 1
+
+Is Sole Proprietor = Y, Sole Proprietor
+Is Sole Proprietor = N, Not a Sole Proprietor
+Is Sole Proprietor = X, Not Answered
+
+4. Among the individual Clinical Neuropsychologists, how many are Male, Female, or Undisclosed?
+
+Individual: Entity Type Code = 1
+
+Provider Sex Code = M, Male
+Provider Sex Code = F, Female
+Provider Sex Code = U, Undisclosed
+Provider Sex Code = X, Undisclosed
+
+5. In both individual Clinical Neuropsychologists and organizations with Clinical Neuropsychologists, how many are taking Medicaid, other, and no insurance taken?
+
+Medicaid: any value in one of the Other Provider Identifier Type Code_1(through 50) = 05
+Other Insurance: any value in one of the Provider Identifier Type Code_1(through 50) = 01, and no one = 05
+No Insurance information disclosed: Provider Identifier Type Code_1(through 50) = empty (or no value)
+
+Then, among those providers that with other codes (no 103G00000X = Clinical Neuropsychologist)  in Healthcare Provider Taxonomy Code_1 (through 15), calculate the following:
+
+Calculate the number if any of the following taxonomy codes appear in any cell in Healthcare Provider Taxonomy Code_1 (through 15): 
+
+
+103TC0700X - Clinical Psychologist (Psychologist) 
+
+103TC2200X - Clinical Child & Adolescent Psychologist (Psychologist) 
+
+103TB0200X - Cognitive & Behavioral Psychologist (Psychologist) 
+
+103TR0400X - Rehabilitation Psychologist (Psychologist) 
+
+2084N0400X - Neurology (MD/DO) 
+
+2084P0301X - Brain Injury Medicine (Psychiatry & Neurology) 
+
+2084P0804X - Child & Adolescent Psychiatry (Psychiatry & Neurology) 
+
+2084P0005X - Neurodevelopmental Disabilities (Psychiatry & Neurology) 
+
+2084N0402X - Neurology with Special Qualifications in Child Neurology (Psychiatry & Neurology) 
+
+
+1. Provide the outcomes in a new spreadsheet, with all names, not the codes.
+2. Provide two separate sheets for individual and organization records
