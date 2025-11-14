@@ -1,0 +1,445 @@
+import pandas as pd
+import numpy as np
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils.dataframe import dataframe_to_rows
+import os
+
+def analyze_nyc_neuropsychologists_updated():
+    """
+    Updated comprehensive analysis of NYC Clinical Neuropsychologists data
+    """
+    
+    # File paths
+    input_file = r"C:/Users/Yueming Zhao/Desktop/Outpatient Neuropsychological Assessment Program/NPPES_Data_Dissemination_November_2025_V2/nyc_5_boroughs_complete.csv"
+    output_file = r"C:/Users/Yueming Zhao/Desktop/Outpatient Neuropsychological Assessment Program/NPPES_Data_Dissemination_November_2025_V2/NYC_Neuropsychologist_Analysis.xlsx"
+    
+    print("🧠 ANALYZING NYC CLINICAL NEUROPSYCHOLOGISTS - UPDATED")
+    print("=" * 60)
+    
+    # Check if input file exists
+    if not os.path.exists(input_file):
+        print(f"❌ Input file not found: {input_file}")
+        return False
+    
+    try:
+        # Read the data
+        print("📊 Loading NYC providers data...")
+        df = pd.read_csv(input_file, dtype=str, low_memory=False)
+        print(f"Total NYC providers loaded: {len(df):,}")
+        
+        # Define taxonomy code mappings with full names
+        taxonomy_codes = {
+            '103G00000X': 'Clinical Neuropsychologist',
+            '103TC0700X': 'Clinical Psychologist',
+            '103TC2200X': 'Clinical Child & Adolescent Psychologist', 
+            '103TB0200X': 'Cognitive & Behavioral Psychologist',
+            '103TR0400X': 'Rehabilitation Psychologist',
+            '2084N0400X': 'Neurology (MD/DO)',
+            '2084P0301X': 'Brain Injury Medicine (Psychiatry & Neurology)',
+            '2084P0804X': 'Child & Adolescent Psychiatry (Psychiatry & Neurology)',
+            '2084P0005X': 'Neurodevelopmental Disabilities (Psychiatry & Neurology)',
+            '2084N0402X': 'Neurology with Special Qualifications in Child Neurology'
+        }
+        
+        # Borough zip code mapping - OFFICIAL USPS DATA
+        borough_zips = {
+            'Manhattan': ['10001', '10002', '10003', '10004', '10005', '10006', '10007', '10008', '10009', '10010', 
+                         '10011', '10012', '10013', '10014', '10016', '10017', '10018', '10019', '10020', '10021', 
+                         '10022', '10023', '10024', '10025', '10026', '10027', '10028', '10029', '10030', '10031', 
+                         '10032', '10033', '10034', '10035', '10036', '10037', '10038', '10039', '10040', '10044', 
+                         '10065', '10069', '10075', '10101', '10104', '10105', '10106', '10107', '10108', '10111', 
+                         '10112', '10113', '10116', '10118', '10119', '10128', '10129', '10150', '10151', '10153', 
+                         '10156', '10159', '10162', '10163', '10165', '10168', '10169', '10170', '10174', '10175', 
+                         '10176', '10178', '10185', '10268', '10272', '10274', '10276', '10280', '10282', '10708', '10979'],
+            'Brooklyn': ['11201', '11202', '11203', '11204', '11205', '11206', '11207', '11208', 
+                        '11209', '11210', '11211', '11212', '11213', '11214', '11215', '11216', 
+                        '11217', '11218', '11219', '11220', '11221', '11222', '11223', '11224', 
+                        '11225', '11226', '11228', '11229', '11230', '11231', '11232', '11233', 
+                        '11234', '11235', '11236', '11237', '11238', '11239', '11247', '11249'],
+            'Queens': ['11101', '11102', '11103', '11105', '11106', '11109', '11352', '11354', 
+                      '11355', '11358', '11360', '11361', '11367', '11368', '11369', '11370', 
+                      '11371', '11372', '11373', '11375', '11377', '11380', '11416', '11417', 
+                      '11424', '11427', '11428', '11429', '11430', '11431', '11432', '11433', '11434', '11435'],
+            'Bronx': ['10451', '10452', '10453', '10454', '10455', '10456', '10457', '10458', 
+                     '10459', '10460', '10461', '10462', '10463', '10464', '10465', '10466', 
+                     '10467', '10468', '10469', '10470', '10471', '10472', '10473', '10474', '10475'],
+            'Staten Island': ['10301', '10302', '10303', '10304', '10305', '10306', '10307', 
+                             '10308', '10309', '10310', '10312', '10313', '10314']
+        }
+        
+        # Create reverse mapping (zip -> borough)
+        zip_to_borough = {}
+        for borough, zips in borough_zips.items():
+            for zip_code in zips:
+                zip_to_borough[zip_code] = borough
+        
+        # Function to extract first 5 digits of zip code
+        def extract_zip5(zip_code):
+            if pd.isna(zip_code) or zip_code == '':
+                return ''
+            return str(zip_code)[:5]
+        
+        # Function to determine borough from addresses
+        def get_borough(row):
+            # Check mailing address first
+            mail_zip = extract_zip5(row.get('Provider Business Mailing Address Postal Code', ''))
+            if mail_zip in zip_to_borough:
+                return zip_to_borough[mail_zip]
+            
+            # Check practice address
+            practice_zip = extract_zip5(row.get('Provider Business Practice Location Address Postal Code', ''))
+            if practice_zip in zip_to_borough:
+                return zip_to_borough[practice_zip]
+            
+            return 'Unknown'
+        
+        # Function to check if provider has specific taxonomy code
+        def has_taxonomy_code(row, code):
+            taxonomy_cols = [f'Healthcare Provider Taxonomy Code_{i}' for i in range(1, 16)]
+            for col in taxonomy_cols:
+                if row.get(col, '') == code:
+                    return True
+            return False
+        
+        # Function to check insurance types (updated logic)
+        def check_insurance_types(row):
+            identifier_type_cols = [f'Other Provider Identifier Type Code_{i}' for i in range(1, 51)]
+            has_medicaid = False
+            has_other = False
+            
+            # Check for Medicaid (05)
+            for col in identifier_type_cols:
+                identifier_type = row.get(col, '')
+                if identifier_type == '05':
+                    has_medicaid = True
+                    break
+            
+            # If Medicaid found, return Medicaid
+            if has_medicaid:
+                return 'Medicaid'
+            
+            # Check for Other Insurance (01) only if no Medicaid
+            for col in identifier_type_cols:
+                identifier_type = row.get(col, '')
+                if identifier_type == '01':
+                    has_other = True
+                    break
+            
+            if has_other:
+                return 'Other Insurance'
+            else:
+                return 'No Insurance Information'
+        
+        print("\n🔍 Identifying Clinical Neuropsychologists...")
+        
+        # Identify Clinical Neuropsychologists
+        clinical_neuropsych_mask = df.apply(lambda row: has_taxonomy_code(row, '103G00000X'), axis=1)
+        clinical_neuropsych_df = df[clinical_neuropsych_mask].copy()
+        
+        print(f"Clinical Neuropsychologists found: {len(clinical_neuropsych_df)}")
+        
+        # Add derived columns
+        clinical_neuropsych_df['Borough'] = clinical_neuropsych_df.apply(get_borough, axis=1)
+        clinical_neuropsych_df['Insurance_Type'] = clinical_neuropsych_df.apply(check_insurance_types, axis=1)
+        
+        # Split into individuals and organizations
+        individual_neuropsych = clinical_neuropsych_df[clinical_neuropsych_df['Entity Type Code'] == '1'].copy()
+        organization_neuropsych = clinical_neuropsych_df[clinical_neuropsych_df['Entity Type Code'] == '2'].copy()
+        
+        # ANALYSIS 1: Individual vs Organization
+        print("\n📈 Analysis 1: Individual vs Organization")
+        individual_count = len(individual_neuropsych)
+        organization_count = len(organization_neuropsych)
+        total_neuropsych = individual_count + organization_count
+        print(f"Individual (Code 1): {individual_count}")
+        print(f"Organization (Code 2): {organization_count}")
+        
+        # ANALYSIS 2: Borough Distribution (UPDATED - separate for individuals and organizations)
+        print("\n📍 Analysis 2: Borough Distribution")
+        print("Individuals by Borough:")
+        individual_borough_analysis = individual_neuropsych['Borough'].value_counts() if len(individual_neuropsych) > 0 else pd.Series()
+        print(individual_borough_analysis)
+        
+        print("\nOrganizations by Borough:")
+        organization_borough_analysis = organization_neuropsych['Borough'].value_counts() if len(organization_neuropsych) > 0 else pd.Series()
+        print(organization_borough_analysis)
+        
+        # ANALYSIS 3: Individual Sole Proprietor Analysis
+        print("\n👤 Analysis 3: Individual Sole Proprietor Analysis")
+        if len(individual_neuropsych) > 0:
+            sole_prop_analysis = individual_neuropsych['Is Sole Proprietor'].value_counts()
+            print(f"Sole Proprietor (Y): {sole_prop_analysis.get('Y', 0)}")
+            print(f"Not Sole Proprietor (N): {sole_prop_analysis.get('N', 0)}")
+            print(f"Not Answered (X): {sole_prop_analysis.get('X', 0)}")
+        
+        # ANALYSIS 4: Individual Gender Analysis
+        print("\n⚧ Analysis 4: Individual Gender Analysis")
+        if len(individual_neuropsych) > 0:
+            gender_analysis = individual_neuropsych['Provider Sex Code'].value_counts()
+            print(f"Male (M): {gender_analysis.get('M', 0)}")
+            print(f"Female (F): {gender_analysis.get('F', 0)}")
+            print(f"Undisclosed (U): {gender_analysis.get('U', 0)}")
+            print(f"Undisclosed (X): {gender_analysis.get('X', 0)}")
+        
+        # ANALYSIS 5: Insurance Analysis (both individuals and organizations)
+        print("\n💰 Analysis 5: Insurance Analysis")
+        print("All Clinical Neuropsychologists (Individuals + Organizations):")
+        insurance_analysis = clinical_neuropsych_df['Insurance_Type'].value_counts()
+        print(insurance_analysis)
+        
+        print("\nIndividuals Only:")
+        individual_insurance_analysis = individual_neuropsych['Insurance_Type'].value_counts() if len(individual_neuropsych) > 0 else pd.Series()
+        print(individual_insurance_analysis)
+        
+        print("\nOrganizations Only:")
+        organization_insurance_analysis = organization_neuropsych['Insurance_Type'].value_counts() if len(organization_neuropsych) > 0 else pd.Series()
+        print(organization_insurance_analysis)
+        
+        # OTHER PROVIDERS ANALYSIS (exclude Clinical Neuropsychologists)
+        print("\n🔬 Analyzing Other Provider Types...")
+        other_providers_data = []
+        
+        for code, name in taxonomy_codes.items():
+            if code != '103G00000X':  # Skip Clinical Neuropsychologists
+                # Only include providers who DON'T have Clinical Neuropsychologist code
+                providers_with_code = df[
+                    df.apply(lambda row: has_taxonomy_code(row, code), axis=1) & 
+                    ~df.apply(lambda row: has_taxonomy_code(row, '103G00000X'), axis=1)
+                ]
+                count = len(providers_with_code)
+                other_providers_data.append({
+                    'Taxonomy Code': code,
+                    'Provider Type': name,
+                    'Count': count
+                })
+                print(f"{name}: {count}")
+        
+        # CREATE EXCEL WORKBOOK
+        print(f"\n📊 Creating updated analysis spreadsheet...")
+        wb = Workbook()
+        
+        # Remove default sheet
+        wb.remove(wb.active)
+        
+        # Headers and formatting
+        header_font = Font(bold=True, color='FFFFFF')
+        header_fill = PatternFill(start_color='366092', end_color='366092', fill_type='solid')
+        title_font = Font(bold=True, size=14)
+        border = Border(
+            left=Side(border_style='thin'),
+            right=Side(border_style='thin'),
+            top=Side(border_style='thin'),
+            bottom=Side(border_style='thin')
+        )
+        
+        # SHEET 1: Clinical Neuropsychologist Summary
+        summary_sheet = wb.create_sheet("Summary")
+        
+        # Add title
+        summary_sheet['A1'] = 'Clinical Neuropsychologist Analysis'
+        summary_sheet['A1'].font = title_font
+        summary_sheet.merge_cells('A1:E1')
+        
+        # Headers for summary table
+        headers = ['Metric', 'Provider Type', 'Category', 'Count', 'Percentage']
+        for col_idx, header in enumerate(headers, 1):
+            cell = summary_sheet.cell(row=3, column=col_idx, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.border = border
+        
+        # Summary data structure - UPDATED with Provider Type column and fixed percentages
+        summary_data = [
+            ['Entity Type', 'Individual', 'Code 1', individual_count, f'={individual_count}/{total_neuropsych}'],
+            ['Entity Type', 'Organization', 'Code 2', organization_count, f'={organization_count}/{total_neuropsych}'],
+            ['', '', '', '', ''],
+            ['Borough', 'Individual', 'Manhattan', individual_borough_analysis.get('Manhattan', 0), f'={individual_borough_analysis.get("Manhattan", 0)}/{individual_count}' if individual_count > 0 else '0'],
+            ['Borough', 'Individual', 'Brooklyn', individual_borough_analysis.get('Brooklyn', 0), f'={individual_borough_analysis.get("Brooklyn", 0)}/{individual_count}' if individual_count > 0 else '0'],
+            ['Borough', 'Individual', 'Queens', individual_borough_analysis.get('Queens', 0), f'={individual_borough_analysis.get("Queens", 0)}/{individual_count}' if individual_count > 0 else '0'],
+            ['Borough', 'Individual', 'Bronx', individual_borough_analysis.get('Bronx', 0), f'={individual_borough_analysis.get("Bronx", 0)}/{individual_count}' if individual_count > 0 else '0'],
+            ['Borough', 'Individual', 'Staten Island', individual_borough_analysis.get('Staten Island', 0), f'={individual_borough_analysis.get("Staten Island", 0)}/{individual_count}' if individual_count > 0 else '0'],
+            ['', '', '', '', ''],
+            ['Borough', 'Organization', 'Manhattan', organization_borough_analysis.get('Manhattan', 0), f'={organization_borough_analysis.get("Manhattan", 0)}/{organization_count}' if organization_count > 0 else '0'],
+            ['Borough', 'Organization', 'Brooklyn', organization_borough_analysis.get('Brooklyn', 0), f'={organization_borough_analysis.get("Brooklyn", 0)}/{organization_count}' if organization_count > 0 else '0'],
+            ['Borough', 'Organization', 'Queens', organization_borough_analysis.get('Queens', 0), f'={organization_borough_analysis.get("Queens", 0)}/{organization_count}' if organization_count > 0 else '0'],
+            ['Borough', 'Organization', 'Bronx', organization_borough_analysis.get('Bronx', 0), f'={organization_borough_analysis.get("Bronx", 0)}/{organization_count}' if organization_count > 0 else '0'],
+            ['Borough', 'Organization', 'Staten Island', organization_borough_analysis.get('Staten Island', 0), f'={organization_borough_analysis.get("Staten Island", 0)}/{organization_count}' if organization_count > 0 else '0'],
+            ['', '', '', '', ''],
+        ]
+        
+        # Add sole proprietor data
+        if len(individual_neuropsych) > 0:
+            sole_prop_counts = individual_neuropsych['Is Sole Proprietor'].value_counts()
+            sole_prop_total = sole_prop_counts.sum()
+            summary_data.extend([
+                ['Sole Proprietor', 'Individual', 'Yes (Y)', sole_prop_counts.get('Y', 0), f'={sole_prop_counts.get("Y", 0)}/{sole_prop_total}' if sole_prop_total > 0 else '0'],
+                ['Sole Proprietor', 'Individual', 'No (N)', sole_prop_counts.get('N', 0), f'={sole_prop_counts.get("N", 0)}/{sole_prop_total}' if sole_prop_total > 0 else '0'],
+                ['Sole Proprietor', 'Individual', 'Not Answered (X)', sole_prop_counts.get('X', 0), f'={sole_prop_counts.get("X", 0)}/{sole_prop_total}' if sole_prop_total > 0 else '0'],
+                ['', '', '', '', ''],
+            ])
+        
+        # Add gender data
+        if len(individual_neuropsych) > 0:
+            gender_counts = individual_neuropsych['Provider Sex Code'].value_counts()
+            male_count = gender_counts.get('M', 0)
+            female_count = gender_counts.get('F', 0)
+            undisclosed_u = gender_counts.get('U', 0)
+            undisclosed_x = gender_counts.get('X', 0)
+            total_undisclosed = undisclosed_u + undisclosed_x
+            gender_total = male_count + female_count + total_undisclosed
+            
+            summary_data.extend([
+                ['Gender', 'Individual', 'Male (M)', male_count, f'={male_count}/{gender_total}' if gender_total > 0 else '0'],
+                ['Gender', 'Individual', 'Female (F)', female_count, f'={female_count}/{gender_total}' if gender_total > 0 else '0'],
+                ['Gender', 'Individual', 'Undisclosed (U+X)', total_undisclosed, f'={total_undisclosed}/{gender_total}' if gender_total > 0 else '0'],
+                ['', '', '', '', ''],
+            ])
+        
+        # Add insurance data - SEPARATE FOR INDIVIDUALS AND ORGANIZATIONS
+        if len(individual_neuropsych) > 0:
+            individual_insurance_total = len(individual_neuropsych)
+            summary_data.extend([
+                ['Insurance', 'Individual', 'Medicaid', individual_insurance_analysis.get('Medicaid', 0), f'={individual_insurance_analysis.get("Medicaid", 0)}/{individual_insurance_total}'],
+                ['Insurance', 'Individual', 'Other Insurance', individual_insurance_analysis.get('Other Insurance', 0), f'={individual_insurance_analysis.get("Other Insurance", 0)}/{individual_insurance_total}'],
+                ['Insurance', 'Individual', 'No Information', individual_insurance_analysis.get('No Insurance Information', 0), f'={individual_insurance_analysis.get("No Insurance Information", 0)}/{individual_insurance_total}'],
+                ['', '', '', '', ''],
+            ])
+        
+        if len(organization_neuropsych) > 0:
+            organization_insurance_total = len(organization_neuropsych)
+            summary_data.extend([
+                ['Insurance', 'Organization', 'Medicaid', organization_insurance_analysis.get('Medicaid', 0), f'={organization_insurance_analysis.get("Medicaid", 0)}/{organization_insurance_total}'],
+                ['Insurance', 'Organization', 'Other Insurance', organization_insurance_analysis.get('Other Insurance', 0), f'={organization_insurance_analysis.get("Other Insurance", 0)}/{organization_insurance_total}'],
+                ['Insurance', 'Organization', 'No Information', organization_insurance_analysis.get('No Insurance Information', 0), f'={organization_insurance_analysis.get("No Insurance Information", 0)}/{organization_insurance_total}'],
+            ])
+        
+        # Write summary data starting from row 4
+        for row_idx, row_data in enumerate(summary_data, 4):
+            for col_idx, value in enumerate(row_data, 1):
+                cell = summary_sheet.cell(row=row_idx, column=col_idx, value=value)
+                cell.border = border
+        
+        # Format percentage column
+        for row in range(4, len(summary_data) + 4):
+            percentage_cell = summary_sheet.cell(row=row, column=5)
+            if percentage_cell.value and str(percentage_cell.value).startswith('='):
+                percentage_cell.number_format = '0.0%'
+        
+        # SHEET 2: Individual Clinical Neuropsychologists
+        individual_sheet = wb.create_sheet("Individuals")
+        
+        # Select relevant columns for individual detail view
+        individual_detail_columns = [
+            'NPI', 'Provider Last Name (Legal Name)', 'Provider First Name',
+            'Provider Sex Code', 'Is Sole Proprietor',
+            'Provider Business Mailing Address State Name',
+            'Provider Business Practice Location Address State Name',
+            'Provider Business Mailing Address Postal Code',
+            'Provider Business Practice Location Address Postal Code',
+            'Borough', 'Insurance_Type'
+        ]
+        
+        # Filter for available columns
+        available_individual_cols = [col for col in individual_detail_columns if col in individual_neuropsych.columns]
+        
+        if len(individual_neuropsych) > 0:
+            individual_detail_df = individual_neuropsych[available_individual_cols].copy()
+            
+            # Write header
+            for col_idx, col_name in enumerate(available_individual_cols, 1):
+                cell = individual_sheet.cell(row=1, column=col_idx, value=col_name)
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.border = border
+            
+            # Write data
+            for row_idx, (_, row) in enumerate(individual_detail_df.iterrows(), 2):
+                for col_idx, value in enumerate(row, 1):
+                    cell = individual_sheet.cell(row=row_idx, column=col_idx, value=value)
+                    cell.border = border
+        
+        # SHEET 3: Organization Clinical Neuropsychologists
+        organization_sheet = wb.create_sheet("Organizations")
+        
+        # Select relevant columns for organization detail view
+        organization_detail_columns = [
+            'NPI', 'Provider Organization Name (Legal Business Name)',
+            'Provider Business Mailing Address State Name',
+            'Provider Business Practice Location Address State Name',
+            'Provider Business Mailing Address Postal Code',
+            'Provider Business Practice Location Address Postal Code',
+            'Borough', 'Insurance_Type'
+        ]
+        
+        # Filter for available columns
+        available_organization_cols = [col for col in organization_detail_columns if col in organization_neuropsych.columns]
+        
+        if len(organization_neuropsych) > 0:
+            organization_detail_df = organization_neuropsych[available_organization_cols].copy()
+            
+            # Write header
+            for col_idx, col_name in enumerate(available_organization_cols, 1):
+                cell = organization_sheet.cell(row=1, column=col_idx, value=col_name)
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.border = border
+            
+            # Write data
+            for row_idx, (_, row) in enumerate(organization_detail_df.iterrows(), 2):
+                for col_idx, value in enumerate(row, 1):
+                    cell = organization_sheet.cell(row=row_idx, column=col_idx, value=value)
+                    cell.border = border
+        
+        # SHEET 4: Provider Types (renamed from "Other Provider Types")
+        provider_types_sheet = wb.create_sheet("Provider Types")
+        
+        # Add Clinical Neuropsychologists to the provider types data
+        all_provider_data = [
+            {'Provider Type': 'Clinical Neuropsychologist', 'Taxonomy Code': '103G00000X', 'Count': len(clinical_neuropsych_df)}
+        ]
+        all_provider_data.extend(other_providers_data)
+        
+        provider_type_data = [['Provider Type', 'Taxonomy Code', 'Count']]
+        for provider in all_provider_data:
+            provider_type_data.append([provider['Provider Type'], provider['Taxonomy Code'], provider['Count']])
+        
+        for row_idx, row_data in enumerate(provider_type_data, 1):
+            for col_idx, value in enumerate(row_data, 1):
+                cell = provider_types_sheet.cell(row=row_idx, column=col_idx, value=value)
+                if row_idx == 1:
+                    cell.font = header_font
+                    cell.fill = header_fill
+                cell.border = border
+        
+        # Save workbook
+        wb.save(output_file)
+        
+        print(f"\n✅ Updated analysis complete! Results saved to:")
+        print(f"{output_file}")
+        
+        print(f"\n📋 SUMMARY:")
+        print(f"• Total Clinical Neuropsychologists: {len(clinical_neuropsych_df)}")
+        print(f"• Individuals: {individual_count}")
+        print(f"• Organizations: {organization_count}")
+        print(f"• Excel file contains 4 sheets:")
+        print(f"  - Summary (key metrics)")
+        print(f"  - Individuals (detailed individual data)")
+        print(f"  - Organizations (detailed organization data)")
+        print(f"  - Provider Types (all provider counts including neuropsychologists)")
+        
+        return True
+        
+    except Exception as e:
+        print(f"\n❌ Error during analysis: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+if __name__ == "__main__":
+    success = analyze_nyc_neuropsychologists_updated()
+    
+    if success:
+        print("\n🎉 SUCCESS: Updated NYC Neuropsychologist analysis completed!")
+    else:
+        print("\n❌ FAILED: Analysis failed!")
