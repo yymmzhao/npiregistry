@@ -1,0 +1,594 @@
+# analyze nyc data, based on the spreadsheet that's already filtered with only nyc records
+# Calculate numbers and demographics by taxonomy
+
+import pandas as pd
+import os
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils.dataframe import dataframe_to_rows
+
+# Define taxonomy codes and their readable names
+TAXONOMY_CODES = {
+    '103G00000X': 'Clinical Neuropsychologist',
+    '103TC0700X': 'Clinical Psychologist',
+    '103TM1800X': 'School Psychologist',
+    '103TC2200X': 'Clinical Child & Adolescent Psychologist',
+    '103TB0200X': 'Cognitive & Behavioral Psychologist',
+    '103TR0400X': 'Rehabilitation Psychologist',
+    '2084B0040X': 'Behavioral Neurology & Neuropsychiatry Physician',
+    '2084P0301X': 'Brain Injury Medicine (Psychiatry & Neurology) Physician',
+    '2084P0804X': 'Child & Adolescent Psychiatry Physician',
+    '2084N0400X': 'Neurology Physician',
+    '2084P0005X': 'Neurodevelopmental Disabilities (Psychiatry & Neurology)',
+    '2084N0402X': 'Neurology with Special Qualifications in Child Neurology',
+    '2084P0800X': 'Psychiatry Physician',
+    '1041S0200X': 'School Social Worker',
+    '1041C0700X': 'Clinical Social Worker',
+    '208100000X': 'Physical Medicine & Rehabilitation Physician',
+    '2081P0301X': 'Brain Injury Medicine (Physical Medicine & Rehabilitation) Physician',
+    '2081P0010X': 'Pediatric Rehabilitation Medicine Physician',
+    '2081P0004X': 'Spinal Cord Injury Medicine Physician',
+    '208000000X': 'Pediatrics Physician',
+    '2080A0000X': 'Pediatric Adolescent Medicine Physician',
+    '2080P0006X': 'Developmental - Behavioral Pediatrics Physician',
+    '2080P0008X': 'Pediatric Neurodevelopmental Disabilities Physician',
+    '2080P0203X': 'Pediatric Critical Care Medicine Physician',
+    '2080P0206X': 'Pediatric Gastroenterology Physician',
+    '2080P1004X': 'Physician Nutrition Specialist (Pediatrics)',
+    '235500000X': 'Speech/Language/Hearing Specialist/Technologist',
+    '235Z00000X': 'Speech–Language Pathologist',
+    '231H00000X': 'Audiologist',
+    '231HA2400X': 'Assistive Technology Practitioner Audiologist',
+    '231HA2500X': 'Assistive Technology Supplier Audiologist',
+    '237600000X': 'Audiologist-Hearing Aid Fitter',
+    '237700000X': 'Hearing Instrument Specialist',
+    '225X00000X': 'Occupational Therapist',
+    '225XN1300X': 'Neurorehabilitation Occupational Therapist',
+    '225XP0200X': 'Pediatric Occupational Therapist',
+    '225XP0019X': 'Physical Rehabilitation Occupational Therapist',
+    '225100000X': 'Physical Therapist',
+    '2251P0200X': 'Pediatric Physical Therapist',
+    '2251N0400X': 'Neurology Physical Therapist',
+    '2251X0800X': 'Orthopedic Physical Therapist',
+    '225C00000X': 'Rehabilitation Counselor',
+    '225CA2400X': 'Assistive Technology Practitioner Rehabilitation Counselor',
+    '225CA2500X': 'Assistive Technology Supplier Rehabilitation Counselor',
+    '225CX0006X': 'Orientation and Mobility Training Rehabilitation Counselor',
+    '225400000X': 'Rehabilitation Practitioner',
+    '363LC1500X': 'Community Health Nurse Practitioner',
+    '363LF0000X': 'Family Nurse Practitioner',
+    '363LP0200X': 'Pediatric Nurse Practitioner',
+    '363LP0222X': 'Critical Care Pediatric Nurse Practitioner',
+    '363LP2300X': 'Primary Care Nurse Practitioner',
+    '363LP0808X': 'Psychiatric/Mental Health Nurse Practitioner',
+    '363LS0200X': 'School Nurse Practitioner'
+}
+
+# Define NYC borough ZIP codes
+manhattan_zips = ['10001', '10002', '10003', '10004', '10005', '10006', '10007', '10008', '10009', '10010', 
+                 '10011', '10012', '10013', '10014', '10016', '10017', '10018', '10019', '10020', '10021', 
+                 '10022', '10023', '10024', '10025', '10026', '10027', '10028', '10029', '10030', '10031', 
+                 '10032', '10033', '10034', '10035', '10036', '10037', '10038', '10039', '10040', '10044', 
+                 '10065', '10069', '10075', '10101', '10104', '10105', '10106', '10107', '10108', '10111', 
+                 '10112', '10113', '10116', '10118', '10119', '10128', '10129', '10150', '10151', '10153', 
+                 '10156', '10159', '10162', '10163', '10165', '10168', '10169', '10170', '10174', '10175', 
+                 '10176', '10178', '10185', '10268', '10272', '10274', '10276', '10280', '10282', '10708', '10979']
+
+brooklyn_zips = ['11201', '11202', '11203', '11204', '11205', '11206', '11207', '11208', 
+                '11209', '11210', '11211', '11212', '11213', '11214', '11215', '11216', 
+                '11217', '11218', '11219', '11220', '11221', '11222', '11223', '11224', 
+                '11225', '11226', '11228', '11229', '11230', '11231', '11232', '11233', 
+                '11234', '11235', '11236', '11237', '11238', '11239', '11247', '11249']
+
+queens_zips = ['11101', '11102', '11103', '11105', '11106', '11109', '11352', '11354', 
+              '11355', '11358', '11360', '11361', '11367', '11368', '11369', '11370', 
+              '11371', '11372', '11373', '11375', '11377', '11380', '11416', '11417', 
+              '11424', '11427', '11428', '11429', '11430', '11431', '11432', '11433', '11434', '11435']
+
+bronx_zips = ['10451', '10452', '10453', '10454', '10455', '10456', '10457', '10458', 
+             '10459', '10460', '10461', '10462', '10463', '10464', '10465', '10466', 
+             '10467', '10468', '10469', '10470', '10471', '10472', '10473', '10474', '10475']
+
+staten_island_zips = ['10301', '10302', '10303', '10304', '10305', '10306', '10307', 
+                     '10308', '10309', '10310', '10312', '10313', '10314']
+
+# Create borough mapping
+borough_zips = {
+    'Manhattan': set(manhattan_zips),
+    'Brooklyn': set(brooklyn_zips),
+    'Queens': set(queens_zips),
+    'Bronx': set(bronx_zips),
+    'Staten Island': set(staten_island_zips)
+}
+
+def extract_first_5_digits(zip_code):
+    """Extract first 5 digits from ZIP code"""
+    if pd.isna(zip_code):
+        return None
+    zip_str = str(zip_code).strip()
+    return zip_str[:5]
+
+def get_borough(zip_code):
+    """Determine borough from ZIP code"""
+    zip5 = extract_first_5_digits(zip_code)
+    if not zip5:
+        return None
+    
+    for borough, zips in borough_zips.items():
+        if zip5 in zips:
+            return borough
+    return None
+
+def get_provider_borough(mailing_zip, practice_zip):
+    """Get borough for provider using same logic as NYC filtering - either address counts"""
+    # Check practice address first
+    practice_borough = get_borough(practice_zip)
+    if practice_borough:
+        return practice_borough
+    
+    # If practice address is not NYC, check mailing address
+    mailing_borough = get_borough(mailing_zip)
+    if mailing_borough:
+        return mailing_borough
+    
+    # If neither address is NYC (shouldn't happen after filtering), return Unknown
+    return 'Unknown'
+
+def clean_sheet_name(name):
+    """Clean sheet name to remove invalid Excel characters and limit length"""
+    # Remove invalid characters: \ / ? * [ ] :
+    invalid_chars = ['\\', '/', '?', '*', '[', ']', ':', '(', ')']
+    cleaned = name
+    for char in invalid_chars:
+        cleaned = cleaned.replace(char, '')
+    
+    # Remove extra spaces and clean up
+    cleaned = ' '.join(cleaned.split())
+    
+    # Aggressive shortening for long names
+    if len(cleaned) > 31:
+        # Common abbreviations for medical terms
+        abbreviations = {
+            'Rehabilitation': 'Rehab',
+            'Technology': 'Tech',
+            'Practitioner': 'Pract',
+            'Specialist': 'Spec',
+            'Medicine': 'Med',
+            'Physical': 'Phys',
+            'Occupational': 'Occ',
+            'Psychiatry': 'Psych',
+            'Psychology': 'Psych',
+            'Neurology': 'Neuro',
+            'Pediatric': 'Ped',
+            'Clinical': 'Clin',
+            'Assistive': 'Assist',
+            'Developmental': 'Dev',
+            'Behavioral': 'Behav',
+            'Critical Care': 'CC',
+            'Nurse Practitioner': 'NP',
+            'Speech-Language': 'Speech-Lang',
+            'Audiologist': 'Audio',
+            'Therapist': 'Ther',
+            'Pathologist': 'Path'
+        }
+        
+        for full_word, abbrev in abbreviations.items():
+            cleaned = cleaned.replace(full_word, abbrev)
+        
+        # If still too long, truncate more aggressively
+        if len(cleaned) > 31:
+            cleaned = cleaned[:28] + "..."
+    
+    return cleaned
+
+def analyze_multidisciplinary_capability(provider_df, target_taxonomy_codes):
+    """
+    Analyze multidisciplinary capability of providers
+    Returns counts for individuals and organizations separately
+    """
+    # Get all taxonomy columns
+    taxonomy_columns = [col for col in provider_df.columns if 'Healthcare Provider Taxonomy Code_' in col]
+    
+    # Initialize results
+    results = {
+        'individuals': {'single_code': 0, 'multi_target_only': 0, 'multi_mixed': 0},
+        'organizations': {'single_code': 0, 'multi_target_only': 0, 'multi_mixed': 0}
+    }
+    
+    for _, provider in provider_df.iterrows():
+        # Get all taxonomy codes for this provider (non-null)
+        provider_codes = []
+        for col in taxonomy_columns:
+            if pd.notna(provider[col]) and str(provider[col]).strip():
+                provider_codes.append(str(provider[col]).strip())
+        
+        # Remove duplicates
+        provider_codes = list(set(provider_codes))
+        
+        # Determine entity type
+        entity_type = 'individuals' if provider['Entity Type Code'] == '1' else 'organizations'
+        
+        if len(provider_codes) == 1:
+            # Single taxonomy code
+            results[entity_type]['single_code'] += 1
+        elif len(provider_codes) > 1:
+            # Multiple taxonomy codes - check if all are in our target list
+            target_codes_present = [code for code in provider_codes if code in target_taxonomy_codes]
+            non_target_codes_present = [code for code in provider_codes if code not in target_taxonomy_codes]
+            
+            if len(target_codes_present) > 0 and len(non_target_codes_present) == 0:
+                # All codes are in our target list
+                results[entity_type]['multi_target_only'] += 1
+            elif len(target_codes_present) > 0 and len(non_target_codes_present) > 0:
+                # Mixed - some target codes, some other codes
+                results[entity_type]['multi_mixed'] += 1
+    
+    return results
+
+def analyze_taxonomy_data(input_file_path, output_file_path):
+    """Analyze NPI data by taxonomy codes and create comprehensive Excel report"""
+    
+    print("Loading NPI data...")
+    # Read the data (assuming it's already filtered for NYC)
+    if input_file_path.endswith('.csv'):
+        df = pd.read_csv(input_file_path, dtype=str, low_memory=False)
+    else:
+        df = pd.read_excel(input_file_path, dtype=str)
+    
+    print(f"Loaded {len(df):,} records")
+    
+    # Add borough information using the same logic as NYC filtering
+    df['Primary_Borough'] = df.apply(
+        lambda row: get_provider_borough(
+            row['Provider Business Mailing Address Postal Code'],
+            row['Provider Business Practice Location Address Postal Code']
+        ), axis=1
+    )
+    
+    # Get taxonomy columns
+    taxonomy_columns = [col for col in df.columns if 'Healthcare Provider Taxonomy Code_' in col]
+    
+    # Create workbook
+    wb = Workbook()
+    wb.remove(wb.active)  # Remove default sheet
+    
+    # Track summary data
+    summary_data = []
+    
+    # Process each taxonomy code
+    for code, name in TAXONOMY_CODES.items():
+        print(f"Processing: {name}")
+        
+        # Find providers with this taxonomy code
+        mask = pd.Series([False] * len(df))
+        for col in taxonomy_columns:
+            mask |= (df[col] == code)
+        
+        taxonomy_df = df[mask].copy()
+        
+        if len(taxonomy_df) == 0:
+            print(f"  No records found for {name}")
+            continue
+            
+        # Calculate metrics
+        total_count = len(taxonomy_df)
+        
+        # Entity type analysis
+        individuals = taxonomy_df[taxonomy_df['Entity Type Code'] == '1']
+        organizations = taxonomy_df[taxonomy_df['Entity Type Code'] == '2']
+        
+        # Borough analysis
+        borough_counts = taxonomy_df['Primary_Borough'].value_counts()
+        
+        # Individual analysis
+        ind_sole_prop = individuals[individuals['Is Sole Proprietor'] == 'Y']
+        ind_not_sole_prop = individuals[individuals['Is Sole Proprietor'] == 'N']
+        ind_sole_prop_unknown = individuals[individuals['Is Sole Proprietor'] == 'X']
+        
+        # Gender analysis
+        ind_male = individuals[individuals['Provider Sex Code'] == 'M']
+        ind_female = individuals[individuals['Provider Sex Code'] == 'F']
+        ind_gender_undisclosed = individuals[individuals['Provider Sex Code'].isin(['U', 'X'])]
+        
+        # Create sheet for this taxonomy
+        clean_name = clean_sheet_name(name)
+        ws = wb.create_sheet(title=clean_name)
+        
+        # Add header styling
+        header_font = Font(bold=True, color='FFFFFF')
+        header_fill = PatternFill(start_color='366092', end_color='366092', fill_type='solid')
+        
+        # Sheet title
+        ws['A1'] = f"{name} Analysis"
+        ws['A1'].font = Font(bold=True, size=16)
+        ws.merge_cells('A1:D1')
+        
+        row = 3
+        
+        # Entity Type Analysis
+        ws[f'A{row}'] = "Entity Type Analysis"
+        ws[f'A{row}'].font = header_font
+        ws[f'A{row}'].fill = header_fill
+        ws.merge_cells(f'A{row}:D{row}')
+        
+        row += 1
+        ws[f'A{row}'] = "Type"
+        ws[f'B{row}'] = "Count"
+        ws[f'C{row}'] = "Percentage"
+        for col in ['A', 'B', 'C']:
+            ws[f'{col}{row}'].font = Font(bold=True)
+        
+        row += 1
+        ws[f'A{row}'] = "Individuals"
+        ws[f'B{row}'] = len(individuals)
+        ws[f'C{row}'] = round((len(individuals) / len(taxonomy_df) * 100), 2) if len(taxonomy_df) > 0 else 0
+        
+        row += 1
+        ws[f'A{row}'] = "Organizations"
+        ws[f'B{row}'] = len(organizations)
+        ws[f'C{row}'] = round((len(organizations) / len(taxonomy_df) * 100), 2) if len(taxonomy_df) > 0 else 0
+        
+        row += 1
+        ws[f'A{row}'] = "Total"
+        ws[f'B{row}'] = total_count
+        ws[f'C{row}'] = "100%"
+        ws[f'A{row}'].font = Font(bold=True)
+        
+        row += 3
+        
+        # Borough Analysis
+        ws[f'A{row}'] = "Borough Distribution"
+        ws[f'A{row}'].font = header_font
+        ws[f'A{row}'].fill = header_fill
+        ws.merge_cells(f'A{row}:D{row}')
+        
+        row += 1
+        ws[f'A{row}'] = "Borough"
+        ws[f'B{row}'] = "Count"
+        ws[f'C{row}'] = "Percentage"
+        for col in ['A', 'B', 'C']:
+            ws[f'{col}{row}'].font = Font(bold=True)
+        
+        for borough in ['Manhattan', 'Brooklyn', 'Queens', 'Bronx', 'Staten Island', 'Unknown']:
+            row += 1
+            count = borough_counts.get(borough, 0)
+            ws[f'A{row}'] = borough
+            ws[f'B{row}'] = count
+            ws[f'C{row}'] = round((count / total_count * 100), 2) if total_count > 0 else 0
+        
+        row += 3
+        
+        # Individual Analysis - Sole Proprietor
+        if len(individuals) > 0:
+            ws[f'A{row}'] = "Individual Analysis - Sole Proprietor Status"
+            ws[f'A{row}'].font = header_font
+            ws[f'A{row}'].fill = header_fill
+            ws.merge_cells(f'A{row}:D{row}')
+            
+            row += 1
+            ws[f'A{row}'] = "Status"
+            ws[f'B{row}'] = "Count"
+            ws[f'C{row}'] = "Percentage of Individuals"
+            for col in ['A', 'B', 'C']:
+                ws[f'{col}{row}'].font = Font(bold=True)
+            
+            row += 1
+            ws[f'A{row}'] = "Sole Proprietor"
+            ws[f'B{row}'] = len(ind_sole_prop)
+            ws[f'C{row}'] = round((len(ind_sole_prop) / len(individuals) * 100), 2) if len(individuals) > 0 else 0
+            
+            row += 1
+            ws[f'A{row}'] = "Not Sole Proprietor"
+            ws[f'B{row}'] = len(ind_not_sole_prop)
+            ws[f'C{row}'] = round((len(ind_not_sole_prop) / len(individuals) * 100), 2) if len(individuals) > 0 else 0
+            
+            row += 1
+            ws[f'A{row}'] = "Not Answered"
+            ws[f'B{row}'] = len(ind_sole_prop_unknown)
+            ws[f'C{row}'] = round((len(ind_sole_prop_unknown) / len(individuals) * 100), 2) if len(individuals) > 0 else 0
+            
+            row += 3
+            
+            # Individual Analysis - Gender
+            ws[f'A{row}'] = "Individual Analysis - Gender"
+            ws[f'A{row}'].font = header_font
+            ws[f'A{row}'].fill = header_fill
+            ws.merge_cells(f'A{row}:D{row}')
+            
+            row += 1
+            ws[f'A{row}'] = "Gender"
+            ws[f'B{row}'] = "Count"
+            ws[f'C{row}'] = "Percentage of Individuals"
+            for col in ['A', 'B', 'C']:
+                ws[f'{col}{row}'].font = Font(bold=True)
+            
+            row += 1
+            ws[f'A{row}'] = "Male"
+            ws[f'B{row}'] = len(ind_male)
+            ws[f'C{row}'] = round((len(ind_male) / len(individuals) * 100), 2) if len(individuals) > 0 else 0
+            
+            row += 1
+            ws[f'A{row}'] = "Female"
+            ws[f'B{row}'] = len(ind_female)
+            ws[f'C{row}'] = round((len(ind_female) / len(individuals) * 100), 2) if len(individuals) > 0 else 0
+            
+            row += 1
+            ws[f'A{row}'] = "Undisclosed"
+            ws[f'B{row}'] = len(ind_gender_undisclosed)
+            ws[f'C{row}'] = round((len(ind_gender_undisclosed) / len(individuals) * 100), 2) if len(individuals) > 0 else 0
+        
+        row += 3
+        
+        # Multidisciplinary Capability Analysis
+        multi_results = analyze_multidisciplinary_capability(taxonomy_df, set(TAXONOMY_CODES.keys()))
+        
+        ws[f'A{row}'] = "Multidisciplinary Capability Analysis"
+        ws[f'A{row}'].font = header_font
+        ws[f'A{row}'].fill = header_fill
+        ws.merge_cells(f'A{row}:D{row}')
+        
+        row += 1
+        ws[f'A{row}'] = "Category"
+        ws[f'B{row}'] = "Individuals"
+        ws[f'C{row}'] = "Organizations"
+        ws[f'D{row}'] = "Total"
+        for col in ['A', 'B', 'C', 'D']:
+            ws[f'{col}{row}'].font = Font(bold=True)
+        
+        row += 1
+        ws[f'A{row}'] = "Single specialty (one taxonomy code)"
+        ws[f'B{row}'] = multi_results['individuals']['single_code']
+        ws[f'C{row}'] = multi_results['organizations']['single_code']
+        ws[f'D{row}'] = multi_results['individuals']['single_code'] + multi_results['organizations']['single_code']
+        
+        row += 1
+        ws[f'A{row}'] = "Multiple specialties (all within target IEP-related categories)"
+        ws[f'B{row}'] = multi_results['individuals']['multi_target_only']
+        ws[f'C{row}'] = multi_results['organizations']['multi_target_only']
+        ws[f'D{row}'] = multi_results['individuals']['multi_target_only'] + multi_results['organizations']['multi_target_only']
+        
+        row += 1
+        ws[f'A{row}'] = "Multiple specialties (mixed relevant & non-relevant codes)"
+        ws[f'B{row}'] = multi_results['individuals']['multi_mixed']
+        ws[f'C{row}'] = multi_results['organizations']['multi_mixed']
+        ws[f'D{row}'] = multi_results['individuals']['multi_mixed'] + multi_results['organizations']['multi_mixed']
+        
+        # Format columns
+        ws.column_dimensions['A'].width = 40
+        ws.column_dimensions['B'].width = 15
+        ws.column_dimensions['C'].width = 20
+        
+        # Store summary data
+        summary_data.append({
+            'Taxonomy': name,
+            'Code': code,
+            'Total': total_count,
+            'Individuals': len(individuals),
+            'Organizations': len(organizations),
+            'Manhattan': borough_counts.get('Manhattan', 0),
+            'Brooklyn': borough_counts.get('Brooklyn', 0),
+            'Queens': borough_counts.get('Queens', 0),
+            'Bronx': borough_counts.get('Bronx', 0),
+            'Staten_Island': borough_counts.get('Staten Island', 0),
+            'Unknown': borough_counts.get('Unknown', 0),
+            'Male': len(ind_male),
+            'Female': len(ind_female),
+            'Gender_Undisclosed': len(ind_gender_undisclosed),
+            'Sole_Proprietor': len(ind_sole_prop),
+            'Not_Sole_Proprietor': len(ind_not_sole_prop),
+            'Sole_Prop_Unknown': len(ind_sole_prop_unknown),
+            'Single_Code_Ind': multi_results['individuals']['single_code'],
+            'Single_Code_Org': multi_results['organizations']['single_code'],
+            'Multi_Target_Ind': multi_results['individuals']['multi_target_only'],
+            'Multi_Target_Org': multi_results['organizations']['multi_target_only'],
+            'Multi_Mixed_Ind': multi_results['individuals']['multi_mixed'],
+            'Multi_Mixed_Org': multi_results['organizations']['multi_mixed']
+        })
+    
+    # Create summary sheet
+    print("Creating summary sheet...")
+    summary_ws = wb.create_sheet(title="Summary", index=0)
+    
+    # Summary header
+    summary_ws['A1'] = "NYC NPI Taxonomy Analysis Summary"
+    summary_ws['A1'].font = Font(bold=True, size=16)
+    summary_ws.merge_cells('A1:P1')
+    
+    # Headers
+    headers = ['Taxonomy', 'Code', 'Total', 'Individuals', 'Organizations', 
+              'Manhattan', 'Brooklyn', 'Queens', 'Bronx', 'Staten Island', 'Unknown',
+              'Male', 'Female', 'Gender Undisclosed', 'Sole Proprietor', 'Not Sole Proprietor', 'SP Unknown',
+              'Single Code Ind', 'Single Code Org', 'Multi Target Ind', 'Multi Target Org', 'Multi Mixed Ind', 'Multi Mixed Org']
+    
+    for i, header in enumerate(headers, 1):
+        cell = summary_ws.cell(row=3, column=i, value=header)
+        cell.font = Font(bold=True)
+        cell.fill = PatternFill(start_color='366092', end_color='366092', fill_type='solid')
+        cell.font = Font(bold=True, color='FFFFFF')
+    
+    # Add data
+    for i, data in enumerate(summary_data, 4):
+        summary_ws.cell(row=i, column=1, value=data['Taxonomy'])
+        summary_ws.cell(row=i, column=2, value=data['Code'])
+        summary_ws.cell(row=i, column=3, value=data['Total'])
+        summary_ws.cell(row=i, column=4, value=data['Individuals'])
+        summary_ws.cell(row=i, column=5, value=data['Organizations'])
+        summary_ws.cell(row=i, column=6, value=data['Manhattan'])
+        summary_ws.cell(row=i, column=7, value=data['Brooklyn'])
+        summary_ws.cell(row=i, column=8, value=data['Queens'])
+        summary_ws.cell(row=i, column=9, value=data['Bronx'])
+        summary_ws.cell(row=i, column=10, value=data['Staten_Island'])
+        summary_ws.cell(row=i, column=11, value=data['Unknown'])
+        summary_ws.cell(row=i, column=12, value=data['Male'])
+        summary_ws.cell(row=i, column=13, value=data['Female'])
+        summary_ws.cell(row=i, column=14, value=data['Gender_Undisclosed'])
+        summary_ws.cell(row=i, column=15, value=data['Sole_Proprietor'])
+        summary_ws.cell(row=i, column=16, value=data['Not_Sole_Proprietor'])
+        summary_ws.cell(row=i, column=17, value=data['Sole_Prop_Unknown'])
+        summary_ws.cell(row=i, column=18, value=data['Single_Code_Ind'])
+        summary_ws.cell(row=i, column=19, value=data['Single_Code_Org'])
+        summary_ws.cell(row=i, column=20, value=data['Multi_Target_Ind'])
+        summary_ws.cell(row=i, column=21, value=data['Multi_Target_Org'])
+        summary_ws.cell(row=i, column=22, value=data['Multi_Mixed_Ind'])
+        summary_ws.cell(row=i, column=23, value=data['Multi_Mixed_Org'])
+    
+    # Auto-fit columns in summary
+    for col in range(1, 24):
+        col_letter = chr(64 + col) if col <= 26 else chr(64 + col//26) + chr(64 + col%26)
+        summary_ws.column_dimensions[col_letter].width = 15
+    
+    # Save workbook
+    wb.save(output_file_path)
+    print(f"Analysis complete! Saved to: {output_file_path}")
+    
+    return summary_data
+
+# Main execution
+if __name__ == "__main__":
+    # Input file (result from previous filtering)
+    input_file = r"C:/Users/Yueming Zhao/Desktop/Multidisciplinary IEP-Related Evaluations/NPI/npi_nyc.csv"
+    
+    # Output file
+    output_file = r"C:/Users/Yueming Zhao/Desktop/Multidisciplinary IEP-Related Evaluations/NPI/npi_nyc_taxonomy_analysis_specialty_practice.xlsx"
+    
+    # Check if input file exists
+    if not os.path.exists(input_file):
+        print(f"Error: Input file not found at {input_file}")
+        print("Please ensure you have run the NYC filtering script first.")
+        print("Looking for alternative file names...")
+        
+        # Try different possible file names
+        possible_files = [
+            input_file.replace('.csv', '.xlsx'),
+            input_file.replace('npi_nyc.csv', 'npi_nyc.xlsx'),
+            'npi_nyc.csv',
+            'npi_nyc.xlsx'
+        ]
+        
+        for possible_file in possible_files:
+            if os.path.exists(possible_file):
+                input_file = possible_file
+                print(f"Found alternative file: {possible_file}")
+                break
+        else:
+            print("No input file found. Please run the NYC filtering script first.")
+            exit(1)
+    
+    # Create output directory if needed
+    output_dir = os.path.dirname(output_file)
+    if output_dir and not os.path.exists(output_dir):
+        try:
+            os.makedirs(output_dir, exist_ok=True)
+            print(f"Created output directory: {output_dir}")
+        except Exception as e:
+            print(f"Could not create output directory: {e}")
+            output_file = "npi_nyc_taxonomy_analysis_specialty_practice.xlsx"
+    
+    # Run analysis
+    summary_data = analyze_taxonomy_data(input_file, output_file)
+    
+    print(f"\n--- Analysis Summary ---")
+    print(f"Processed {len(summary_data)} taxonomy categories")
+    total_providers = sum(data['Total'] for data in summary_data)
+    print(f"Total providers analyzed: {total_providers:,}")
+    print(f"Output file: {output_file}")
