@@ -1,0 +1,75 @@
+# after already filtering NYC data from the original data, filter the taxonomy codes based on your needs
+# calculate the number of providers in each taxonomy
+# analyze its demographics per taxonomy 
+
+File path: C:/Users/Yueming Zhao/Desktop/Multidisciplinary IEP-Related Evaluations/NPI
+
+When any of the columns Healthcare Provider Taxonomy Code_1 (through 15) have the following code: 
+Clinical Neuropsychologist	103G00000X
+Clinical Psychologist 	103TC0700X 
+School Psychologist	103TM1800X
+Clinical Child & Adolescent Psychologist 	103TC2200X 
+Cognitive & Behavioral Psychologist 	103TB0200X 
+Rehabilitation Psychologist 	103TR0400X 
+Behavioral Neurology & Neuropsychiatry Physician	2084B0040X
+Brain Injury Medicine (Psychiatry & Neurology) Physician	2084P0301X
+Child & Adolescent Psychiatry Physician	2084P0804X
+Neurology Physician	2084N0400X
+Neurodevelopmental Disabilities (Psychiatry & Neurology) 	2084P0005X 
+Neurology with Special Qualifications in Child Neurology 	2084N0402X 
+Psychiatry Physician	2084P0800X
+School Social Worker	1041S0200X
+Clinical Social Worker 	1041C0700X
+Physical Medicine & Rehabilitation Physician	208100000X
+Brain Injury Medicine (Physical Medicine & Rehabilitation) Physician	2081P0301X
+Pediatric Rehabilitation Medicine Physician	2081P0010X
+Spinal Cord Injury Medicine Physician	2081P0004X
+Pediatrics Physician	208000000X
+Pediatric Adolescent Medicine Physician	2080A0000X
+Developmental - Behavioral Pediatrics Physician	2080P0006X
+Pediatric Neurodevelopmental Disabilities Physician	2080P0008X
+Pediatric Critical Care Medicine Physician	2080P0203X
+Pediatric Gastroenterology Physician	2080P0206X
+Physician Nutrition Specialist (Pediatrics)	2080P1004X
+Speech/Language/Hearing Specialist/Technologist	235500000X
+Speech–Language Pathologist	235Z00000X
+Audiologist	231H00000X
+Assistive Technology Practitioner Audiologist	231HA2400X
+Assistive Technology Supplier Audiologist	231HA2500X
+Audiologist-Hearing Aid Fitter	237600000X
+Hearing Instrument Specialist	237700000X
+Occupational Therapist	225X00000X
+Neurorehabilitation Occupational Therapist	225XN1300X
+Pediatric Occupational Therapist	225XP0200X
+Physical Rehabilitation Occupational Therapist	225XP0019X
+Physical Therapist	225100000X
+Pediatric Physical Therapist	2251P0200X
+Neurology Physical Therapist	2251N0400X
+Orthopedic Physical Therapist	2251X0800X
+Rehabilitation Counselor	225C00000X
+Assistive Technology Practitioner Rehabilitation Counselor	225CA2400X
+Assistive Technology Supplier Rehabilitation Counselor	225CA2500X
+Orientation and Mobility Training Rehabilitation Counselor	225CX0006X
+Rehabilitation Practitioner	225400000X
+Community Health Nurse Practitioner	363LC1500X
+Family Nurse Practitioner	363LF0000X
+Pediatric Nurse Practitioner	363LP0200X
+Critical Care Pediatric Nurse Practitioner	363LP0222X
+Primary Care Nurse Practitioner	363LP2300X
+Psychiatric/Mental Health Nurse Practitioner	363LP0808X
+School Nurse Practitioner	363LS0200X
+
+Do the following analysis: 
+
+1. Create a separate sheet for each taxonomy with names, not codes
+2. In each sheet, calculate the following metrics
+  - How many are individuals and organizations (Individual: Entity Type Code = 1; Organization: Entity Type Code = 2)
+  - How many individuals and organizations are in each borough (based on the zip codes you had in the last script)
+  - Among the individuals, how many are Sole Proprietors and not a Sole Proprietor? （Individual: Entity Type Code = 1； Is Sole Proprietor = Y, Sole Proprietor； Is Sole Proprietor = N, Not a Sole Proprietor； Is Sole Proprietor = X, Not Answered）
+  - Among the individuals, how many are Male, Female, or Undisclosed? (Individual: Entity Type Code = 1; Provider Sex Code = M, Male; Provider Sex Code = F, Female; Provider Sex Code = U, Undisclosed; Provider Sex Code = X, Undisclosed)
+  - Multidisciplinary capability". 1. How many of them only have one taxonomy code, seperate number for individuals and organizations. 2. How many of them have more than one taxonomy codes, and all of them are in the taxonomy codes I listed. 3. How many of them have more than one taxonomy codes, some of them has the code I listed, but some of them are other codes. 
+3. Create a “Summary" sheet to summarize all this information with counts and percentages
+4. Create a new spreadsheet for the outcome named "npi_nyc taxonomy analysis_specialty practice"
+
+Provide a Python script for Jupyter
+
