@@ -1,0 +1,238 @@
+import pandas as pd
+import os
+
+# Define all taxonomy codes and their readable names
+ALL_TAXONOMY_CODES = {
+    '103G00000X': 'Clinical Neuropsychologist',
+    '103TC0700X': 'Clinical Psychologist',
+    '103TM1800X': 'School Psychologist',
+    '103TC2200X': 'Clinical Child & Adolescent Psychologist',
+    '103TB0200X': 'Cognitive & Behavioral Psychologist',
+    '103TR0400X': 'Rehabilitation Psychologist',
+    '2084B0040X': 'Behavioral Neurology & Neuropsychiatry Physician',
+    '2084P0301X': 'Brain Injury Medicine (Psychiatry & Neurology) Physician',
+    '2084P0804X': 'Child & Adolescent Psychiatry Physician',
+    '2084N0400X': 'Neurology Physician',
+    '2084P0005X': 'Neurodevelopmental Disabilities (Psychiatry & Neurology)',
+    '2084N0402X': 'Neurology with Special Qualifications in Child Neurology',
+    '2084P0800X': 'Psychiatry Physician',
+    '1041S0200X': 'School Social Worker',
+    '1041C0700X': 'Clinical Social Worker',
+    '208100000X': 'Physical Medicine & Rehabilitation Physician',
+    '2081P0301X': 'Brain Injury Medicine (Physical Medicine & Rehabilitation) Physician',
+    '2081P0010X': 'Pediatric Rehabilitation Medicine Physician',
+    '2081P0004X': 'Spinal Cord Injury Medicine Physician',
+    '208000000X': 'Pediatrics Physician',
+    '2080A0000X': 'Pediatric Adolescent Medicine Physician',
+    '2080P0006X': 'Developmental - Behavioral Pediatrics Physician',
+    '2080P0008X': 'Pediatric Neurodevelopmental Disabilities Physician',
+    '2080P0203X': 'Pediatric Critical Care Medicine Physician',
+    '2080P0206X': 'Pediatric Gastroenterology Physician',
+    '2080P1004X': 'Physician Nutrition Specialist (Pediatrics)',
+    '235500000X': 'Speech/Language/Hearing Specialist/Technologist',
+    '235Z00000X': 'Speech–Language Pathologist',
+    '231H00000X': 'Audiologist',
+    '231HA2400X': 'Assistive Technology Practitioner Audiologist',
+    '231HA2500X': 'Assistive Technology Supplier Audiologist',
+    '237600000X': 'Audiologist-Hearing Aid Fitter',
+    '237700000X': 'Hearing Instrument Specialist',
+    '225X00000X': 'Occupational Therapist',
+    '225XN1300X': 'Neurorehabilitation Occupational Therapist',
+    '225XP0200X': 'Pediatric Occupational Therapist',
+    '225XP0019X': 'Physical Rehabilitation Occupational Therapist',
+    '225100000X': 'Physical Therapist',
+    '2251P0200X': 'Pediatric Physical Therapist',
+    '2251N0400X': 'Neurology Physical Therapist',
+    '2251X0800X': 'Orthopedic Physical Therapist',
+    '225C00000X': 'Rehabilitation Counselor',
+    '225CA2400X': 'Assistive Technology Practitioner Rehabilitation Counselor',
+    '225CA2500X': 'Assistive Technology Supplier Rehabilitation Counselor',
+    '225CX0006X': 'Orientation and Mobility Training Rehabilitation Counselor',
+    '225400000X': 'Rehabilitation Practitioner',
+    '363LC1500X': 'Community Health Nurse Practitioner',
+    '363LF0000X': 'Family Nurse Practitioner',
+    '363LP0200X': 'Pediatric Nurse Practitioner',
+    '363LP0222X': 'Critical Care Pediatric Nurse Practitioner',
+    '363LP2300X': 'Primary Care Nurse Practitioner',
+    '363LP0808X': 'Psychiatric/Mental Health Nurse Practitioner',
+    '363LS0200X': 'School Nurse Practitioner',
+    '261QM0855X': 'Adolescent and Children Mental Health Clinic/Center',
+    '261QC1500X': 'Community Health Clinic/Center',
+    '261QD1600X': 'Developmental Disabilities Clinic/Center',
+    '261QH0700X': 'Hearing and Speech Clinic/Center',
+    '261QM3000X': 'Medically Fragile Infants and Children Day Care',
+    '261QP2000X': 'Physical Therapy Clinic/Center',
+    '261QP2300X': 'Primary Care Clinic/Center',
+    '261QR0400X': 'Rehabilitation Clinic/Center',
+    '261QR0401X': 'Comprehensive Outpatient Rehabilitation Facility (CORF)',
+    '261QS1000X': 'Student Health Clinic/Center',
+    '273R00000X': 'Psychiatric Hospital Unit',
+    '273Y00000X': 'Rehabilitation Hospital Unit',
+    '281PC2000X': 'Children\'s Chronic Disease Hospital',
+    '282NC2000X': 'General Acute Care Children\'s Hospital',
+    '283X00000X': 'Rehabilitation Hospital',
+    '283XC2000X': 'Children\'s Rehabilitation Hospital',
+    '320900000X': 'Intellectual/Developmental Disabilities Community Based Residential Treatment',
+    '323P00000X': 'Psychiatric Residential Treatment Facility',
+    '322D00000X': 'Emotionally Disturbed Children\'s Residential Treatment Facility',
+    '320600000X': 'Intellectual/Developmental Disabilities Residential Treatment Facility',
+    '320700000X': 'Physical Disabilities Residential Treatment Facility'
+}
+
+def load_evaluation_services():
+    """Load evaluation services mapping"""
+    file_path = r'C:/Users/Yueming Zhao/Desktop/Multidisciplinary IEP-Related Evaluations/NPI/Multidisciplinary IEP-Related Evaluations.xlsx'
+    
+    try:
+        print(f"Loading: {file_path}")
+        df = pd.read_excel(file_path)
+        print(f"✅ Loaded {len(df)} rows")
+        
+        services_map = {}
+        valid_codes = set()
+        
+        for _, row in df.iterrows():
+            code = str(row['Taxonomy code']).strip()
+            services = row['Provider-Eligible Evaluation Types']
+            
+            if pd.notna(services) and str(services).strip():
+                services_map[code] = str(services).strip()
+                valid_codes.add(code)
+        
+        print(f"✅ Found {len(services_map)} codes with services")
+        return services_map, valid_codes
+        
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        return {}, set()
+
+def create_consolidated_records(input_file, output_file):
+    """Create consolidated organization records"""
+    
+    print("Loading NPI data...")
+    df = pd.read_csv(input_file, dtype=str, low_memory=False)
+    print(f"Loaded {len(df):,} records")
+    
+    # Load services
+    services_map, valid_codes = load_evaluation_services()
+    if not services_map:
+        return 0
+    
+    # Get organizations only
+    orgs = df[df['Entity Type Code'] == '2'].copy()
+    print(f"Found {len(orgs):,} organizations")
+    
+    # Get taxonomy columns
+    tax_cols = [col for col in df.columns if 'Healthcare Provider Taxonomy Code_' in col]
+    
+    # Process organizations
+    results = []
+    count = 0
+    
+    for idx, row in orgs.iterrows():
+        if count % 5000 == 0:
+            print(f"Processed {count:,} organizations...")
+        count += 1
+        
+        # Get this org's taxonomy codes
+        org_codes = []
+        for col in tax_cols:
+            if pd.notna(row[col]) and str(row[col]).strip():
+                org_codes.append(str(row[col]).strip())
+        
+        # Skip if no target services
+        if not any(code in valid_codes for code in org_codes):
+            continue
+        
+        # Get taxonomy names
+        names = []
+        for code in org_codes:
+            if code in ALL_TAXONOMY_CODES:
+                name = ALL_TAXONOMY_CODES[code]
+                if name not in names:
+                    names.append(name)
+        
+        # Get services
+        all_services = set()
+        for code in org_codes:
+            if code in services_map:
+                services = services_map[code]
+                service_list = [s.strip() for s in services.split(',')]
+                all_services.update([s for s in service_list if s])
+        
+        # Capability
+        if len(org_codes) == 1:
+            capability = "Single specialty (one taxonomy code)"
+        elif len(org_codes) > 1:
+            target_codes = [c for c in org_codes if c in valid_codes]
+            other_codes = [c for c in org_codes if c not in valid_codes]
+            
+            if len(target_codes) > 0 and len(other_codes) == 0:
+                capability = "Multiple specialties (all within target IEP-related categories)"
+            else:
+                capability = "Multiple specialties (mixed relevant & non-relevant codes)"
+        else:
+            capability = "Unknown"
+        
+        # Build record
+        record = {
+            'Multidisciplinary Capability': capability,
+            'Taxonomy': ', '.join(names) if names else 'Unknown',
+            'Evaluation Services': ', '.join(sorted(all_services)) if all_services else 'None listed'
+        }
+        
+        # Add original columns
+        for col in orgs.columns:
+            record[col] = row[col]
+        
+        results.append(record)
+    
+    print(f"Found {len(results):,} organizations with target services")
+    
+    if not results:
+        return 0
+    
+    # Create output DataFrame
+    output_df = pd.DataFrame(results)
+    
+    # Remove duplicates by NPI
+    if 'NPI' in output_df.columns:
+        before = len(output_df)
+        output_df = output_df.drop_duplicates(subset=['NPI'], keep='first')
+        after = len(output_df)
+        print(f"Removed {before - after:,} duplicates, final: {after:,}")
+    
+    # Save as CSV file with UTF-8 encoding (prevents character issues)
+    print(f"Saving to: {output_file}")
+    output_df.to_csv(output_file, index=False, encoding='utf-8-sig')
+    
+    print(f"✅ Created CSV file with {len(output_df):,} unique organizations")
+    return len(output_df)
+
+# Main execution
+if __name__ == "__main__":
+    input_file = r"C:/Users/Yueming Zhao/Desktop/Multidisciplinary IEP-Related Evaluations/NPI/npi_nyc.csv"
+    output_file = r"C:/Users/Yueming Zhao/Desktop/Multidisciplinary IEP-Related Evaluations/NPI/npi_organizations_consolidated.csv"
+    
+    # Check input file
+    if not os.path.exists(input_file):
+        alt_files = ['npi_nyc.csv', 'npi_nyc.xlsx']
+        for alt in alt_files:
+            if os.path.exists(alt):
+                input_file = alt
+                break
+        else:
+            print("Input file not found")
+            exit(1)
+    
+    # Create output directory
+    output_dir = os.path.dirname(output_file)
+    if output_dir and not os.path.exists(output_dir):
+        try:
+            os.makedirs(output_dir, exist_ok=True)
+        except:
+            output_file = "npi_organizations_consolidated.csv"
+    
+    # Run
+    total = create_consolidated_records(input_file, output_file)
+    print(f"\n✅ COMPLETE: {total:,} organizations in {output_file}")
