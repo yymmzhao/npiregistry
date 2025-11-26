@@ -1,0 +1,349 @@
+import pandas as pd
+import os
+
+# Define all taxonomy codes and their readable names (combined from both analyses)
+ALL_TAXONOMY_CODES = {
+    # Specialty Practice Providers
+    '103G00000X': 'Clinical Neuropsychologist',
+    '103TC0700X': 'Clinical Psychologist',
+    '103TM1800X': 'School Psychologist',
+    '103TC2200X': 'Clinical Child & Adolescent Psychologist',
+    '103TB0200X': 'Cognitive & Behavioral Psychologist',
+    '103TR0400X': 'Rehabilitation Psychologist',
+    '2084B0040X': 'Behavioral Neurology & Neuropsychiatry Physician',
+    '2084P0301X': 'Brain Injury Medicine (Psychiatry & Neurology) Physician',
+    '2084P0804X': 'Child & Adolescent Psychiatry Physician',
+    '2084N0400X': 'Neurology Physician',
+    '2084P0005X': 'Neurodevelopmental Disabilities (Psychiatry & Neurology)',
+    '2084N0402X': 'Neurology with Special Qualifications in Child Neurology',
+    '2084P0800X': 'Psychiatry Physician',
+    '1041S0200X': 'School Social Worker',
+    '1041C0700X': 'Clinical Social Worker',
+    '208100000X': 'Physical Medicine & Rehabilitation Physician',
+    '2081P0301X': 'Brain Injury Medicine (Physical Medicine & Rehabilitation) Physician',
+    '2081P0010X': 'Pediatric Rehabilitation Medicine Physician',
+    '2081P0004X': 'Spinal Cord Injury Medicine Physician',
+    '208000000X': 'Pediatrics Physician',
+    '2080A0000X': 'Pediatric Adolescent Medicine Physician',
+    '2080P0006X': 'Developmental - Behavioral Pediatrics Physician',
+    '2080P0008X': 'Pediatric Neurodevelopmental Disabilities Physician',
+    '2080P0203X': 'Pediatric Critical Care Medicine Physician',
+    '2080P0206X': 'Pediatric Gastroenterology Physician',
+    '2080P1004X': 'Physician Nutrition Specialist (Pediatrics)',
+    '235500000X': 'Speech/Language/Hearing Specialist/Technologist',
+    '235Z00000X': 'Speech–Language Pathologist',
+    '231H00000X': 'Audiologist',
+    '231HA2400X': 'Assistive Technology Practitioner Audiologist',
+    '231HA2500X': 'Assistive Technology Supplier Audiologist',
+    '237600000X': 'Audiologist-Hearing Aid Fitter',
+    '237700000X': 'Hearing Instrument Specialist',
+    '225X00000X': 'Occupational Therapist',
+    '225XN1300X': 'Neurorehabilitation Occupational Therapist',
+    '225XP0200X': 'Pediatric Occupational Therapist',
+    '225XP0019X': 'Physical Rehabilitation Occupational Therapist',
+    '225100000X': 'Physical Therapist',
+    '2251P0200X': 'Pediatric Physical Therapist',
+    '2251N0400X': 'Neurology Physical Therapist',
+    '2251X0800X': 'Orthopedic Physical Therapist',
+    '225C00000X': 'Rehabilitation Counselor',
+    '225CA2400X': 'Assistive Technology Practitioner Rehabilitation Counselor',
+    '225CA2500X': 'Assistive Technology Supplier Rehabilitation Counselor',
+    '225CX0006X': 'Orientation and Mobility Training Rehabilitation Counselor',
+    '225400000X': 'Rehabilitation Practitioner',
+    '363LC1500X': 'Community Health Nurse Practitioner',
+    '363LF0000X': 'Family Nurse Practitioner',
+    '363LP0200X': 'Pediatric Nurse Practitioner',
+    '363LP0222X': 'Critical Care Pediatric Nurse Practitioner',
+    '363LP2300X': 'Primary Care Nurse Practitioner',
+    '363LP0808X': 'Psychiatric/Mental Health Nurse Practitioner',
+    '363LS0200X': 'School Nurse Practitioner',
+    
+    # Hospital and Facility Providers
+    '261QM0855X': 'Adolescent and Children Mental Health Clinic/Center',
+    '261QC1500X': 'Community Health Clinic/Center',
+    '261QD1600X': 'Developmental Disabilities Clinic/Center',
+    '261QH0700X': 'Hearing and Speech Clinic/Center',
+    '261QM3000X': 'Medically Fragile Infants and Children Day Care',
+    '261QP2000X': 'Physical Therapy Clinic/Center',
+    '261QP2300X': 'Primary Care Clinic/Center',
+    '261QR0400X': 'Rehabilitation Clinic/Center',
+    '261QR0401X': 'Comprehensive Outpatient Rehabilitation Facility (CORF)',
+    '261QS1000X': 'Student Health Clinic/Center',
+    '273R00000X': 'Psychiatric Hospital Unit',
+    '273Y00000X': 'Rehabilitation Hospital Unit',
+    '281PC2000X': 'Children\'s Chronic Disease Hospital',
+    '282NC2000X': 'General Acute Care Children\'s Hospital',
+    '283X00000X': 'Rehabilitation Hospital',
+    '283XC2000X': 'Children\'s Rehabilitation Hospital',
+    '320900000X': 'Intellectual/Developmental Disabilities Community Based Residential Treatment',
+    '323P00000X': 'Psychiatric Residential Treatment Facility',
+    '322D00000X': 'Emotionally Disturbed Children\'s Residential Treatment Facility',
+    '320600000X': 'Intellectual/Developmental Disabilities Residential Treatment Facility',
+    '320700000X': 'Physical Disabilities Residential Treatment Facility'
+}
+
+def load_evaluation_services_mapping():
+    """Load the evaluation services mapping from the Excel file"""
+    
+    # Try multiple possible locations - exact path from user's screenshot first
+    possible_paths = [
+        r'C:/Users/Yueming Zhao/Desktop/Multidisciplinary IEP-Related Evaluations/NPI/Multidisciplinary IEP-Related Evaluations.xlsx',
+        r'C:\Users\Yueming Zhao\Desktop\Multidisciplinary IEP-Related Evaluations\NPI\Multidisciplinary IEP-Related Evaluations.xlsx',
+        r'C:/Users/Yueming Zhao/Desktop/Multidisciplinary IEP-Related Evaluations/Multidisciplinary_IEP-Related_Evaluations.xlsx',
+        r'C:/Users/Yueming Zhao/Desktop/Multidisciplinary_IEP-Related_Evaluations.xlsx',
+        r'C:/Users/Yueming Zhao/Desktop/Outpatient Neuropsychological Assessment Program/Multidisciplinary_IEP-Related_Evaluations.xlsx',
+        'Multidisciplinary_IEP-Related_Evaluations.xlsx',
+        './Multidisciplinary_IEP-Related_Evaluations.xlsx'
+    ]
+    
+    print("Searching for evaluation services file...")
+    
+    for file_path in possible_paths:
+        print(f"Trying: {file_path}")
+        if os.path.exists(file_path):
+            print(f"✅ Found file at: {file_path}")
+            break
+    else:
+        print("❌ File not found at any expected location.")
+        print("\nPlease check if the file exists and update the path below:")
+        print("You can either:")
+        print("1. Copy the file to your current working directory with name 'Multidisciplinary_IEP-Related_Evaluations.xlsx'")
+        print("2. Or modify the script with the correct path")
+        return {}, set()
+    
+    try:
+        print(f"Loading evaluation services from: {file_path}")
+        
+        # Try different engines
+        try:
+            df = pd.read_excel(file_path, engine='openpyxl')
+        except:
+            try:
+                df = pd.read_excel(file_path, engine='xlrd')
+            except:
+                df = pd.read_excel(file_path)
+        
+        print(f"✅ Successfully loaded file with {len(df)} rows")
+        print(f"Columns: {list(df.columns)}")
+        
+        services_mapping = {}
+        valid_codes = set()
+        
+        services_col = 'Provider-Eligible Evaluation Types'
+        code_col = 'Taxonomy code'
+        
+        if services_col not in df.columns or code_col not in df.columns:
+            print(f"❌ Required columns not found. Available: {list(df.columns)}")
+            return {}, set()
+        
+        processed = 0
+        for _, row in df.iterrows():
+            code = str(row[code_col]).strip()
+            services = row[services_col]
+            
+            if pd.notna(services):
+                services_str = str(services).strip()
+                if services_str and services_str.lower() not in ['nan', 'none', '']:
+                    services_mapping[code] = services_str
+                    valid_codes.add(code)
+                    if processed < 3:  # Show first 3
+                        print(f"✅ {code} -> {services_str[:50]}...")
+                    processed += 1
+        
+        print(f"✅ Loaded {len(services_mapping)} codes with evaluation services")
+        return services_mapping, valid_codes
+        
+    except Exception as e:
+        print(f"❌ Error loading evaluation services: {e}")
+        return {}, set()
+
+def create_organization_records(input_file_path, output_file_path):
+    """Create Excel file with organization records for each taxonomy"""
+    
+    print("=" * 60)
+    print("LOADING NPI DATA")
+    print("=" * 60)
+    
+    # Read the data
+    if input_file_path.endswith('.csv'):
+        df = pd.read_csv(input_file_path, dtype=str, low_memory=False)
+    else:
+        df = pd.read_excel(input_file_path, dtype=str)
+    
+    print(f"✅ Loaded {len(df):,} total records")
+    
+    # Load evaluation services mapping
+    print("\n" + "=" * 60)
+    print("LOADING EVALUATION SERVICES")
+    print("=" * 60)
+    
+    services_mapping, valid_codes = load_evaluation_services_mapping()
+    
+    if not services_mapping:
+        print("❌ No evaluation services loaded. Exiting.")
+        return 0
+    
+    # Filter taxonomy codes to only those with evaluation services
+    filtered_codes = {code: name for code, name in ALL_TAXONOMY_CODES.items() if code in valid_codes}
+    print(f"✅ Processing {len(filtered_codes)} codes with evaluation services")
+    
+    # Get taxonomy columns
+    taxonomy_columns = [col for col in df.columns if 'Healthcare Provider Taxonomy Code_' in col]
+    print(f"✅ Found {len(taxonomy_columns)} taxonomy columns")
+    
+    # Filter for organizations only
+    org_df = df[df['Entity Type Code'] == '2'].copy().reset_index(drop=True)
+    print(f"✅ Found {len(org_df):,} organization records")
+    
+    # Create output data
+    print("\n" + "=" * 60)
+    print("PROCESSING ORGANIZATIONS")
+    print("=" * 60)
+    
+    all_sheets = {}
+    
+    for code, name in filtered_codes.items():
+        print(f"\n📋 Processing: {name}")
+        
+        # Find organizations with this code
+        has_code = pd.Series([False] * len(org_df))
+        for col in taxonomy_columns:
+            if col in org_df.columns:
+                has_code = has_code | (org_df[col] == code)
+        
+        subset = org_df[has_code].copy()
+        
+        if len(subset) == 0:
+            print(f"   ❌ No organizations found")
+            continue
+            
+        print(f"   ✅ Found {len(subset)} organizations")
+        
+        # Add new columns
+        new_data = []
+        
+        for idx, row in subset.iterrows():
+            # Get all taxonomy codes for this org
+            org_codes = []
+            for col in taxonomy_columns:
+                if pd.notna(row[col]) and str(row[col]).strip():
+                    org_codes.append(str(row[col]).strip())
+            
+            # Get taxonomy names
+            taxonomy_names = []
+            for c in org_codes:
+                if c in ALL_TAXONOMY_CODES:
+                    taxonomy_names.append(ALL_TAXONOMY_CODES[c])
+            
+            # Get evaluation services
+            all_services = set()
+            for c in org_codes:
+                if c in services_mapping:
+                    services = services_mapping[c]
+                    service_list = [s.strip() for s in services.split(',')]
+                    all_services.update([s for s in service_list if s])
+            
+            # Determine multidisciplinary capability
+            if len(org_codes) == 1:
+                capability = "Single specialty (one taxonomy code)"
+            elif len(org_codes) > 1:
+                target_codes = [c for c in org_codes if c in valid_codes]
+                other_codes = [c for c in org_codes if c not in valid_codes]
+                
+                if len(target_codes) > 0 and len(other_codes) == 0:
+                    capability = "Multiple specialties (all within target IEP-related categories)"
+                elif len(target_codes) > 0 and len(other_codes) > 0:
+                    capability = "Multiple specialties (mixed relevant & non-relevant codes)"
+                else:
+                    capability = "Unknown capability"
+            else:
+                capability = "Unknown capability"
+            
+            # Create new row
+            new_row = {
+                'Multidisciplinary Capability': capability,
+                'Taxonomy': ', '.join(taxonomy_names) if taxonomy_names else 'Unknown',
+                'Evaluation Services': ', '.join(sorted(all_services)) if all_services else 'No evaluation services listed'
+            }
+            
+            # Add all original columns
+            for col in subset.columns:
+                new_row[col] = row[col]
+            
+            new_data.append(new_row)
+        
+        if new_data:
+            # Create DataFrame with proper column order
+            new_df = pd.DataFrame(new_data)
+            new_columns = ['Multidisciplinary Capability', 'Taxonomy', 'Evaluation Services']
+            original_columns = [col for col in subset.columns]
+            final_columns = new_columns + original_columns
+            new_df = new_df[final_columns]
+            
+            # Clean sheet name
+            sheet_name = name.replace('/', '-').replace('\\', '-').replace('?', '').replace('*', '')
+            sheet_name = sheet_name.replace('[', '').replace(']', '').replace(':', '')
+            if len(sheet_name) > 31:
+                sheet_name = sheet_name[:28] + "..."
+            
+            all_sheets[sheet_name] = new_df
+            print(f"   ✅ Added sheet: {sheet_name}")
+    
+    # Write to Excel
+    print("\n" + "=" * 60)
+    print("WRITING EXCEL FILE")
+    print("=" * 60)
+    
+    if all_sheets:
+        with pd.ExcelWriter(output_file_path, engine='openpyxl') as writer:
+            for sheet_name, df in all_sheets.items():
+                df.to_excel(writer, sheet_name=sheet_name, index=False)
+                print(f"✅ Wrote sheet: {sheet_name} ({len(df)} records)")
+        
+        print(f"\n✅ SUCCESS: Created {len(all_sheets)} sheets in {output_file_path}")
+        return len(all_sheets)
+    else:
+        print("❌ No data to write")
+        return 0
+
+# Main execution
+if __name__ == "__main__":
+    # Input file
+    input_file = r"C:/Users/Yueming Zhao/Desktop/Multidisciplinary IEP-Related Evaluations/NPI/npi_nyc.csv"
+    
+    # Output file  
+    output_file = r"C:/Users/Yueming Zhao/Desktop/Multidisciplinary IEP-Related Evaluations/NPI/npi_nyc_organizations_clean.xlsx"
+    
+    # Check if input exists
+    if not os.path.exists(input_file):
+        possible_files = [
+            input_file.replace('.csv', '.xlsx'),
+            'npi_nyc.csv',
+            'npi_nyc.xlsx'
+        ]
+        
+        for possible_file in possible_files:
+            if os.path.exists(possible_file):
+                input_file = possible_file
+                print(f"✅ Using file: {possible_file}")
+                break
+        else:
+            print("❌ No input file found")
+            exit(1)
+    
+    # Create output directory
+    output_dir = os.path.dirname(output_file)
+    if output_dir and not os.path.exists(output_dir):
+        try:
+            os.makedirs(output_dir, exist_ok=True)
+        except:
+            output_file = "npi_nyc_organizations_clean.xlsx"
+    
+    # Run analysis
+    sheets_created = create_organization_records(input_file, output_file)
+    
+    print("\n" + "=" * 60)
+    print("FINAL SUMMARY")
+    print("=" * 60)
+    print(f"Sheets created: {sheets_created}")
+    print(f"Output file: {output_file}")
