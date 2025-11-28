@@ -339,8 +339,8 @@ filtered_file = main_filter_step()
 # created a new cell
 ----
 # Use your original script with the fixed Search Engine ID
-API_KEY = "AIzaSyA7IDHP19xsyec5zt79uMvOgiL6JyNHiZI"
-SEARCH_ENGINE_ID = "43d208b4118ca4ceb"
+API_KEY = "your api key"
+SEARCH_ENGINE_ID = "your search engine id"
 
 # Run a small batch first to test
 final_file = main_website_step("npi_multi_service_organizations.csv", API_KEY, SEARCH_ENGINE_ID)
