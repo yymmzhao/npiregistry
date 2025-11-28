@@ -1,0 +1,346 @@
+# after get a list of organizaitons with target taxonomy, and for those who have multi-spetialty in their evaluation services column, connect google search API to find the webistes for each organization
+# steps before running the sciprt: Get Your API Key:
+# Go to: https://console.cloud.google.com/
+# Create/Select Project
+# Enable API: Search for "Custom Search API" and enable it
+# Create Credentials: Go to "Credentials" → "Create Credentials" → "API Key"
+# Copy your API key
+# Get Your Search Engine ID:
+# Go to: https://cse.google.com/
+# Click "Add" to create new search engine
+# Sites to search: Enter * (to search the entire web)
+# Create and copy your "Search engine ID"
+
+The sciprt starts below this line
+-----
+import pandas as pd
+import requests
+import time
+import re
+from urllib.parse import urlparse
+import json
+
+def filter_multi_service_organizations(input_file, output_file):
+    """
+    First step: Filter organizations that have multiple evaluation services
+    This reduces the dataset size significantly before website searching
+    """
+    print("=" * 60)
+    print("FILTERING MULTI-SERVICE ORGANIZATIONS")
+    print("=" * 60)
+    
+    # Load data
+    print("Loading organization data...")
+    df = pd.read_csv(input_file, low_memory=False)
+    print(f"Total organizations: {len(df):,}")
+    
+    # Filter for organizations with multiple evaluation services
+    multi_service_orgs = []
+    
+    for idx, row in df.iterrows():
+        if idx % 1000 == 0:
+            print(f"Processed {idx:,}/{len(df):,} organizations...")
+        
+        eval_services = row.get('Evaluation Services', '')
+        
+        # Check if there are multiple services (contains comma)
+        if pd.notna(eval_services) and isinstance(eval_services, str):
+            # Count commas to determine if multiple services
+            if ',' in eval_services.strip():
+                multi_service_orgs.append(row)
+    
+    # Create filtered dataframe
+    filtered_df = pd.DataFrame(multi_service_orgs)
+    
+    print(f"\n" + "=" * 60)
+    print("FILTERING RESULTS")
+    print("=" * 60)
+    print(f"Original organizations: {len(df):,}")
+    print(f"Multi-service organizations: {len(filtered_df):,}")
+    print(f"Reduction: {len(df) - len(filtered_df):,} organizations ({(len(df) - len(filtered_df))/len(df)*100:.1f}%)")
+    
+    # Add Website column in correct position (between Evaluation Services and NPI)
+    columns = list(filtered_df.columns)
+    eval_services_idx = columns.index('Evaluation Services')
+    
+    # Insert Website column after Evaluation Services
+    columns.insert(eval_services_idx + 1, 'Website')
+    
+    # Add empty Website column
+    filtered_df['Website'] = ""
+    
+    # Reorder columns
+    filtered_df = filtered_df[columns]
+    
+    # Save filtered data
+    filtered_df.to_csv(output_file, index=False, encoding='utf-8-sig')
+    print(f"Saved filtered organizations to: {output_file}")
+    
+    print(f"\nEstimated API cost for {len(filtered_df):,} organizations:")
+    print(f"Free tier (100/day): {len(filtered_df)/100:.1f} days")
+    print(f"Paid tier: ${len(filtered_df) * 0.005:.2f} (at $5 per 1,000 searches)")
+    
+    return len(filtered_df)
+
+class GoogleWebsiteFinder:
+    def __init__(self, api_key, search_engine_id):
+        self.api_key = api_key
+        self.search_engine_id = search_engine_id
+        self.base_url = "https://www.googleapis.com/customsearch/v1"
+        self.requests_made = 0
+        self.max_requests_per_day = 100  # Free tier limit
+        
+    def search_organization_website(self, org_name, city=None, state=None):
+        """Search for organization website using Google Custom Search API"""
+        try:
+            if self.requests_made >= self.max_requests_per_day:
+                return "Daily API limit reached"
+            
+            # Clean and prepare search query
+            search_query = self.clean_organization_name(org_name)
+            
+            # Add location context if available
+            if city and pd.notna(city):
+                search_query += f" {city}"
+            if state and pd.notna(state):
+                search_query += f" {state}"
+            
+            # Add context terms to find official website
+            search_query += " healthcare medical practice clinic"
+            
+            # Make API request
+            params = {
+                'key': self.api_key,
+                'cx': self.search_engine_id,
+                'q': search_query,
+                'num': 5  # Get top 5 results
+            }
+            
+            response = requests.get(self.base_url, params=params, timeout=10)
+            self.requests_made += 1
+            
+            if response.status_code != 200:
+                return f"API Error: {response.status_code}"
+            
+            results = response.json()
+            website = self.extract_best_website(results, org_name)
+            
+            # Add small delay to be respectful to API
+            time.sleep(0.2)
+            
+            return website
+            
+        except requests.exceptions.Timeout:
+            return "Search timeout"
+        except requests.exceptions.RequestException as e:
+            return f"Network error: {str(e)}"
+        except Exception as e:
+            return f"Error: {str(e)}"
+    
+    def clean_organization_name(self, org_name):
+        """Clean organization name for better search results"""
+        if pd.isna(org_name):
+            return ""
+        
+        cleaned = str(org_name).strip()
+        suffixes = ['PLLC', 'PC', 'LLC', 'INC', 'CORP', 'LTD', 'P.C.', 'P.L.L.C.']
+        
+        for suffix in suffixes:
+            cleaned = re.sub(rf'\b{suffix}\b', '', cleaned, flags=re.IGNORECASE)
+        
+        cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+        return cleaned
+    
+    def extract_best_website(self, search_results, org_name):
+        """Extract the most likely official website from search results"""
+        if 'items' not in search_results:
+            return "No results found"
+        
+        websites = []
+        
+        for item in search_results['items']:
+            url = item.get('link', '')
+            title = item.get('title', '')
+            snippet = item.get('snippet', '')
+            
+            if not self.is_valid_website_url(url):
+                continue
+            
+            score = self.calculate_relevance_score(url, title, snippet, org_name)
+            websites.append((url, score, title))
+        
+        if not websites:
+            return "No valid websites found"
+        
+        best_website = sorted(websites, key=lambda x: x[1], reverse=True)[0]
+        return best_website[0]
+    
+    def is_valid_website_url(self, url):
+        """Check if URL is a valid website"""
+        try:
+            parsed = urlparse(url)
+            
+            if not parsed.netloc:
+                return False
+            
+            skip_domains = [
+                'facebook.com', 'twitter.com', 'linkedin.com', 'instagram.com',
+                'yelp.com', 'yellowpages.com', 'google.com', 'youtube.com'
+            ]
+            
+            skip_extensions = ['.pdf', '.doc', '.docx', '.jpg', '.png', '.gif']
+            
+            domain = parsed.netloc.lower()
+            path = parsed.path.lower()
+            
+            for skip_domain in skip_domains:
+                if skip_domain in domain:
+                    return False
+            
+            for skip_ext in skip_extensions:
+                if path.endswith(skip_ext):
+                    return False
+            
+            return True
+            
+        except:
+            return False
+    
+    def calculate_relevance_score(self, url, title, snippet, org_name):
+        """Calculate how likely this URL is the official website"""
+        score = 0
+        
+        org_name_clean = self.clean_organization_name(org_name).lower()
+        url_lower = url.lower()
+        title_lower = title.lower()
+        
+        org_words = org_name_clean.split()
+        for word in org_words:
+            if len(word) > 3:
+                if word in url_lower:
+                    score += 10
+                if word in title_lower:
+                    score += 5
+        
+        if '.com' in url_lower or '.org' in url_lower:
+            score += 3
+        
+        healthcare_terms = ['medical', 'health', 'clinic', 'therapy', 'rehab', 'hospital']
+        for term in healthcare_terms:
+            if term in url_lower or term in title_lower:
+                score += 2
+        
+        if url_lower.count('/') <= 3:
+            score += 1
+        
+        return score
+
+def add_websites_to_filtered_organizations(input_file, output_file, api_key, search_engine_id):
+    """Add website information to pre-filtered multi-service organizations"""
+    
+    print("=" * 60)
+    print("ADDING WEBSITES TO MULTI-SERVICE ORGANIZATIONS")
+    print("=" * 60)
+    
+    # Initialize website finder
+    finder = GoogleWebsiteFinder(api_key, search_engine_id)
+    
+    # Load filtered data
+    print("Loading filtered organization data...")
+    df = pd.read_csv(input_file, low_memory=False)
+    print(f"Multi-service organizations to process: {len(df):,}")
+    
+    # Verify Website column exists and is in correct position
+    if 'Website' not in df.columns:
+        print("❌ Website column not found. Please run filtering step first.")
+        return 0
+    
+    # Process organizations
+    processed = 0
+    found_websites = 0
+    errors = 0
+    
+    print(f"\nStarting website search (max {finder.max_requests_per_day} per day)...")
+    
+    for idx, row in df.iterrows():
+        if processed % 10 == 0:
+            print(f"Processed {processed:,}/{len(df):,} | Found: {found_websites} | Errors: {errors} | API: {finder.requests_made}")
+        
+        org_name = row.get('Provider Organization Name (Legal Business Name)', '')
+        city = row.get('Provider Business Mailing Address City Name', '')
+        state = row.get('Provider Business Mailing Address State Name', '')
+        
+        if pd.notna(org_name) and str(org_name).strip():
+            website = finder.search_organization_website(org_name, city, state)
+            df.at[idx, 'Website'] = website
+            
+            # Count results
+            if website and not any(term in website.lower() for term in ['error', 'timeout', 'not found', 'limit reached']):
+                found_websites += 1
+                print(f"  ✅ Found: {website}")
+            elif 'error' in website.lower() or 'timeout' in website.lower():
+                errors += 1
+            
+            # Stop if daily limit reached
+            if finder.requests_made >= finder.max_requests_per_day:
+                print(f"\n🛑 Reached daily API limit of {finder.max_requests_per_day} requests")
+                print(f"Processed {processed + 1} organizations so far")
+                break
+        
+        processed += 1
+    
+    print(f"\n" + "=" * 60)
+    print("WEBSITE SEARCH RESULTS")
+    print("=" * 60)
+    print(f"Organizations processed: {processed:,}")
+    print(f"Websites found: {found_websites:,} ({found_websites/processed*100:.1f}%)")
+    print(f"API requests made: {finder.requests_made}")
+    print(f"Errors: {errors}")
+    
+    # Save results
+    print(f"\nSaving results to: {output_file}")
+    df.to_csv(output_file, index=False, encoding='utf-8-sig')
+    print("✅ File saved successfully!")
+    
+    return found_websites
+
+# Main execution functions
+def main_filter_step():
+    """Step 1: Filter for multi-service organizations"""
+    input_file = r"npi_organizations_consolidated.csv"
+    output_file = r"npi_multi_service_organizations.csv"
+    
+    multi_count = filter_multi_service_organizations(input_file, output_file)
+    print(f"\n✅ STEP 1 COMPLETE: {multi_count:,} multi-service organizations ready for website search")
+    return output_file
+
+def main_website_step(filtered_file, api_key, search_engine_id):
+    """Step 2: Add websites to filtered organizations"""
+    output_file = r"Mulnpi_multi_service_with_websites.csv"
+    
+    websites_found = add_websites_to_filtered_organizations(filtered_file, output_file, api_key, search_engine_id)
+    print(f"\n✅ STEP 2 COMPLETE: Found {websites_found:,} websites")
+    return output_file
+
+if __name__ == "__main__":
+    print("Multi-Service Organization Website Finder")
+    print("========================================")
+    print("\nThis script has two steps:")
+    print("1. Filter for organizations with multiple evaluation services")
+    print("2. Find websites for those organizations only")
+    print("\nTo run:")
+    print("1. First run: main_filter_step()")
+    print("2. Then run: main_website_step() with your API credentials")
+
+# Run the filtering step (no API credentials needed)
+filtered_file = main_filter_step()
+
+
+# created a new cell
+----
+# Use your original script with the fixed Search Engine ID
+API_KEY = "AIzaSyA7IDHP19xsyec5zt79uMvOgiL6JyNHiZI"
+SEARCH_ENGINE_ID = "43d208b4118ca4ceb"
+
+# Run a small batch first to test
+final_file = main_website_step("npi_multi_service_organizations.csv", API_KEY, SEARCH_ENGINE_ID)
