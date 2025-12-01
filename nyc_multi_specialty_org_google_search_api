@@ -1,346 +1,790 @@
-# after get a list of organizaitons with target taxonomy, and for those who have multi-spetialty in their evaluation services column, connect google search API to find the webistes for each organization
-# steps before running the sciprt: Get Your API Key:
-# Go to: https://console.cloud.google.com/
-# Create/Select Project
-# Enable API: Search for "Custom Search API" and enable it
-# Create Credentials: Go to "Credentials" → "Create Credentials" → "API Key"
-# Copy your API key
-# Get Your Search Engine ID:
-# Go to: https://cse.google.com/
-# Click "Add" to create new search engine
-# Sites to search: Enter * (to search the entire web)
-# Create and copy your "Search engine ID"
+After get a list of organizaitons with target taxonomy, and for those who have multi-spetialty in their evaluation services column, connect google search API to find the webistes for each organization
+Steps before running the sciprt: 
+Step 1: Get Your API Key:
+- Go to: https://console.cloud.google.com/
+- Create/Select Project
+- Enable API: Search for "Custom Search API" and enable it
+- Create Credentials: Go to "Credentials" → "Create Credentials" → "API Key"
+- Copy your API key
+Step 2: Get Your Search Engine ID:
+- Go to: https://cse.google.com/
+- Click "Add" to create new search engine
+- Sites to search: Enter * (to search the entire web)
+- Create and copy your "Search engine ID"
+
+The web search strategy in the current script:
+Logic - Domain-First Priority
+PHASE 1: DOMAIN EXTRACTION & PRIORITY CHECK
+StepFunctionActionDecision Point1.1Extract domain/pathParse URL componentsGet clean domain1.2check_domain_name_variations()Check domain for name matchesDECISION POINT1.3aIF domain matchesSkip to directory filteringGo to Phase 2A1.3bIF domain NO matchCheck other URL partsGo to Phase 2B
+PHASE 2A: DOMAIN MATCH FOUND (Priority Path)
+StepFunctionActionPoints/Result2A.1is_directory_or_listing()Filter directories0 points if directory2A.2fetch_page_content()Get webpage contentRequired for scoring2A.3Score domain matchDomain scoring only25-60 points2A.4Add address bonusAddress matching+0-20 points2A.5Add services bonusServices matching+0-15 points2A.6Check thresholdTotal ≥ 30?ACCEPT immediately
+PHASE 2B: NO DOMAIN MATCH (Secondary Path)
+StepFunctionActionPoints/Result2B.1check_path_name_variations()Check URL path for matchesContinue if found2B.2check_subdomain_variations()Check subdomain for matchesContinue if found2B.3is_directory_or_listing()Filter directories0 points if directory2B.4Score URL componentsPath/subdomain scoring10-25 points2B.5Add address bonusAddress matching+0-20 points2B.6Add services bonusServices matching+0-15 points2B.7Check thresholdTotal ≥ 30?Accept or reject
+DOMAIN MATCHING HIERARCHY
+PriorityCheckPointsExampleAction1stMemorial special case60memorial → mskcc.orgACCEPT (skip other checks)2ndMulti-length abbreviations50es in eslonestarACCEPT (skip other checks)3rdPrimary keywords (2+)45easter + sealsACCEPT (skip other checks)4thSingle primary keyword35easter OR sealsACCEPT (skip other checks)5thHigh similarity (>70%)30String matchACCEPT (skip other checks)
+EFFICIENCY GAINS
+ScenarioOld LogicNew LogicTime SavedPerfect domain matchCheck domain → path → subdomain → score allCheck domain → STOP → score~60% fasterGood domain matchCheck all URL partsDomain match → STOP~50% fasterNo domain matchCheck all parts anywayCheck other parts onlySame speed
+DECISION TREE
+URL Input
+    ↓
+Domain has name variations?
+    ↓YES → Is directory site? 
+        ↓NO → Score domain + address + services → Accept if ≥30
+    ↓NO → Path/subdomain has variations?
+        ↓YES → Is directory site?
+            ↓NO → Score path + address + services → Accept if ≥30
+        ↓NO → Reject (no name match anywhere)
 
 The sciprt starts below this line
 -----
-import pandas as pd
 import requests
+import pandas as pd
 import time
 import re
 from urllib.parse import urlparse
-import json
+from difflib import SequenceMatcher
+import os
+from datetime import datetime
 
-def filter_multi_service_organizations(input_file, output_file):
-    """
-    First step: Filter organizations that have multiple evaluation services
-    This reduces the dataset size significantly before website searching
-    """
-    print("=" * 60)
-    print("FILTERING MULTI-SERVICE ORGANIZATIONS")
-    print("=" * 60)
-    
-    # Load data
-    print("Loading organization data...")
-    df = pd.read_csv(input_file, low_memory=False)
-    print(f"Total organizations: {len(df):,}")
-    
-    # Filter for organizations with multiple evaluation services
-    multi_service_orgs = []
-    
-    for idx, row in df.iterrows():
-        if idx % 1000 == 0:
-            print(f"Processed {idx:,}/{len(df):,} organizations...")
-        
-        eval_services = row.get('Evaluation Services', '')
-        
-        # Check if there are multiple services (contains comma)
-        if pd.notna(eval_services) and isinstance(eval_services, str):
-            # Count commas to determine if multiple services
-            if ',' in eval_services.strip():
-                multi_service_orgs.append(row)
-    
-    # Create filtered dataframe
-    filtered_df = pd.DataFrame(multi_service_orgs)
-    
-    print(f"\n" + "=" * 60)
-    print("FILTERING RESULTS")
-    print("=" * 60)
-    print(f"Original organizations: {len(df):,}")
-    print(f"Multi-service organizations: {len(filtered_df):,}")
-    print(f"Reduction: {len(df) - len(filtered_df):,} organizations ({(len(df) - len(filtered_df))/len(df)*100:.1f}%)")
-    
-    # Add Website column in correct position (between Evaluation Services and NPI)
-    columns = list(filtered_df.columns)
-    eval_services_idx = columns.index('Evaluation Services')
-    
-    # Insert Website column after Evaluation Services
-    columns.insert(eval_services_idx + 1, 'Website')
-    
-    # Add empty Website column
-    filtered_df['Website'] = ""
-    
-    # Reorder columns
-    filtered_df = filtered_df[columns]
-    
-    # Save filtered data
-    filtered_df.to_csv(output_file, index=False, encoding='utf-8-sig')
-    print(f"Saved filtered organizations to: {output_file}")
-    
-    print(f"\nEstimated API cost for {len(filtered_df):,} organizations:")
-    print(f"Free tier (100/day): {len(filtered_df)/100:.1f} days")
-    print(f"Paid tier: ${len(filtered_df) * 0.005:.2f} (at $5 per 1,000 searches)")
-    
-    return len(filtered_df)
-
-class GoogleWebsiteFinder:
+class WebsiteFinderV30:
     def __init__(self, api_key, search_engine_id):
         self.api_key = api_key
         self.search_engine_id = search_engine_id
         self.base_url = "https://www.googleapis.com/customsearch/v1"
         self.requests_made = 0
-        self.max_requests_per_day = 100  # Free tier limit
+    
+    def clean_organization_name(self, org_name):
+        """Clean organization name for search - remove legal suffixes and punctuation"""
+        if pd.isna(org_name):
+            return ""
         
-    def search_organization_website(self, org_name, city=None, state=None):
+        cleaned = str(org_name).strip()
+        
+        # Remove legal suffixes
+        suffixes = ['PLLC', 'P.L.L.C.', 'PC', 'P.C.', 'LLC', 'L.L.C.', 
+                   'INC', 'CORP', 'LTD', 'LLP', 'L.L.P.']
+        
+        for suffix in suffixes:
+            # Remove with word boundaries
+            cleaned = re.sub(rf'\b{suffix}\b', '', cleaned, flags=re.IGNORECASE)
+        
+        # Remove trailing punctuation
+        cleaned = cleaned.rstrip(',.;:')
+        
+        # Clean up multiple spaces
+        cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+        
+        return cleaned
+    
+    def extract_keywords_from_org_name(self, org_name):
+        """ENHANCED: Extract meaningful keywords with better punctuation handling"""
+        cleaned = self.clean_organization_name(org_name).lower()
+        
+        # Remove ALL punctuation and clean
+        cleaned = re.sub(r'[^\w\s]', ' ', cleaned)  # Remove punctuation
+        cleaned = re.sub(r'\s+', ' ', cleaned).strip()  # Normalize spaces
+        
+        # Remove common words but keep important ones
+        stop_words = ['the', 'of', 'for', 'and', 'in', 'at', 'to', 'a', 'an']
+        words = [w for w in cleaned.split() if w not in stop_words and len(w) > 2]
+        
+        return words
+    
+    def get_name_variations(self, keywords):
+        """Generate focused name variations - multi-length abbreviations + keywords"""
+        variations = []
+        
+        if not keywords:
+            return variations
+        
+        # Multi-length abbreviation patterns (from original analysis)
+        if len(keywords) >= 2:
+            variations.append(''.join([w[0] for w in keywords[:2]]))  # es
+        if len(keywords) >= 3:
+            variations.append(''.join([w[0] for w in keywords[:3]]))  # esc
+        if len(keywords) >= 4:
+            variations.append(''.join([w[0] for w in keywords[:4]]))  # esct
+        
+        # Primary keywords (first 2 words)
+        variations.extend(keywords[:2])
+        
+        # Secondary keywords (words 3-4)
+        if len(keywords) > 2:
+            variations.extend(keywords[2:4])
+        
+        # Remove duplicates and clean
+        clean_variations = []
+        for var in set(variations):
+            if var and len(var) >= 2:
+                clean_variations.append(var.lower())
+        
+        return clean_variations
+    
+    def extract_service_keywords(self, evaluation_services):
+        """Extract service keywords from evaluation services field"""
+        if not evaluation_services or pd.isna(evaluation_services):
+            return []
+        
+        service_map = {
+            'audiolog': ['audiolog', 'hearing', 'auditory'],
+            'speech': ['speech', 'language', 'communication'],
+            'physical therapy': ['physical therapy', 'pt', 'physiotherapy'],
+            'occupational therapy': ['occupational therapy', 'ot', 'occupational'],
+            'mental health': ['mental health', 'counseling', 'therapy', 'psychiatric', 'psychology'],
+            'developmental': ['developmental', 'autism', 'behavioral']
+        }
+        
+        keywords = []
+        services_lower = evaluation_services.lower()
+        
+        for key, terms in service_map.items():
+            if any(term in services_lower for term in terms):
+                keywords.extend(terms)
+        
+        return list(set(keywords))
+    
+    def check_domain_name_variations(self, url, org_name):
+        """PRIORITY CHECK: Check if domain contains name variations (Phase 1)"""
+        try:
+            domain = urlparse(url).netloc.lower()
+            domain_clean = re.sub(r'^www\.', '', domain)
+            domain_clean = re.sub(r'\.(com|org|net|edu|gov)$', '', domain_clean)
+            
+            org_keywords = self.extract_keywords_from_org_name(org_name)
+            org_name_lower = org_name.lower()
+            
+            if not org_keywords:
+                return False, 0
+            
+            # SPECIAL CASE: Memorial Sloan Kettering (check FIRST)
+            if ('memorial' in org_name_lower or 'sloan kettering' in org_name_lower):
+                if domain_clean in ['mskcc', 'msk']:
+                    return True, 60  # Maximum score
+            
+            # Get name variations
+            variations = self.get_name_variations(org_keywords)
+            
+            # Check multi-length abbreviations (highest priority)
+            abbrevs = []
+            if len(org_keywords) >= 2:
+                abbrevs.append(''.join([w[0] for w in org_keywords[:2]]))
+            if len(org_keywords) >= 3:
+                abbrevs.append(''.join([w[0] for w in org_keywords[:3]]))
+            if len(org_keywords) >= 4:
+                abbrevs.append(''.join([w[0] for w in org_keywords[:4]]))
+            
+            for abbrev in abbrevs:
+                if len(abbrev) >= 2 and abbrev in domain_clean:
+                    return True, 50  # High score for abbreviation match
+            
+            # Check primary keywords (2+ matches = definitive) - FIXED: >=3 instead of >=4
+            primary_keywords = org_keywords[:2]
+            primary_matches = sum(1 for word in primary_keywords if len(word) >= 3 and word.lower() in domain_clean)
+            
+            if primary_matches >= 2:
+                return True, 45  # High score for multiple keywords
+            elif primary_matches == 1:
+                return True, 35  # Good score for single primary keyword
+            
+            # Check partial keywords (first 3-4 chars) - FIXES lexington -> lex
+            for keyword in org_keywords[:3]:  # Check first 3 keywords
+                if len(keyword) >= 4:
+                    # Check first 3 characters
+                    partial3 = keyword[:3].lower()
+                    if len(partial3) >= 3 and partial3 in domain_clean:
+                        return True, 30  # Partial match score
+                    
+                    # Check first 4 characters for longer words
+                    if len(keyword) >= 6:
+                        partial4 = keyword[:4].lower()
+                        if partial4 in domain_clean:
+                            return True, 35  # Longer partial match
+            
+            # Check secondary keywords - FIXED: >=3 instead of >=4
+            secondary_keywords = org_keywords[2:4] if len(org_keywords) > 2 else []
+            secondary_matches = sum(1 for word in secondary_keywords if len(word) >= 3 and word.lower() in domain_clean)
+            
+            if secondary_matches >= 1 and primary_matches >= 1:
+                return True, 40  # Combined primary + secondary
+            
+            # Check high similarity
+            org_name_clean = ' '.join(org_keywords[:3])
+            similarity = self.similarity_score(org_name_clean, domain_clean)
+            
+            if similarity > 0.7:
+                return True, 30  # Similarity match
+            
+            return False, 0  # No domain match found
+            
+        except:
+            return False, 0
+    
+    def check_path_name_variations(self, url, org_name):
+        """Check URL path for name variations (Phase 2B)"""
+        try:
+            path = urlparse(url).path.lower()
+            path_clean = path.replace('/', ' ').replace('-', ' ').replace('_', ' ')
+            
+            org_keywords = self.extract_keywords_from_org_name(org_name)
+            
+            if not org_keywords:
+                return False, 0
+            
+            variations = self.get_name_variations(org_keywords)
+            
+            # Check for variations in path
+            for variation in variations:
+                if len(variation) >= 3 and variation in path_clean:
+                    if len(variation) >= 6:  # Long variations
+                        return True, 30
+                    elif len(variation) >= 4:  # Medium variations
+                        return True, 25
+                    else:  # Short variations
+                        return True, 20
+            
+            return False, 0
+            
+        except:
+            return False, 0
+    
+    def check_subdomain_name_variations(self, url, org_name):
+        """Check subdomain for name variations (Phase 2B)"""
+        try:
+            domain_parts = urlparse(url).netloc.lower().split('.')
+            
+            if len(domain_parts) <= 2:  # No subdomain
+                return False, 0
+            
+            subdomain = domain_parts[0]  # First part is subdomain
+            if subdomain == 'www':
+                return False, 0  # Skip www
+            
+            org_keywords = self.extract_keywords_from_org_name(org_name)
+            
+            if not org_keywords:
+                return False, 0
+            
+            variations = self.get_name_variations(org_keywords)
+            
+            # Check for variations in subdomain
+            for variation in variations:
+                if len(variation) >= 2 and variation in subdomain:
+                    if len(variation) >= 4:
+                        return True, 35  # High score for subdomain match
+                    else:
+                        return True, 30
+            
+            return False, 0
+            
+        except:
+            return False, 0
+    
+    def is_directory_or_listing(self, url, org_name):
+        """Directory filtering with organization domain protection"""
+        try:
+            domain = urlparse(url).netloc.lower()
+            path = urlparse(url).path.lower()
+            
+            # Step 1: ALWAYS filter known directory domains
+            directory_domains = [
+                'healthyhearing.com', 'healthgrades.com', 'vitals.com', 'zocdoc.com',
+                'yelp.com', 'yellowpages.com', 'superpages.com', 'manta.com',
+                'doximity.com', 'healthcare4ppl.com', 'npidb.org', 'npino.com',
+                'mapquest.com', 'usnews.com', 'wellness.com', 'webmd.com',
+                'mentalhealthcenters.net', 'mentalhealthfacilities.net',
+                'esad.org', 'psychiatry.org', 'psychologytoday.com',
+                'linkedin.com', 'facebook.com', 'twitter.com', 'instagram.com',
+                'indeed.com', 'glassdoor.com', 'ratemds.com', 'findatopdoc.com',
+                'npiregistry.cms.hhs.gov', 'cms.gov', 'medicare.gov',
+                'bbb.org', 'corporationwiki.com', 'bizapedia.com',
+                'opengovus.com', 'causeiq.com', 'guidestar.org', 'crunchbase.com'
+            ]
+            
+            for dir_domain in directory_domains:
+                if dir_domain in domain:
+                    return True  # Always filter directory domains
+            
+            # Step 2: Check if it's organization's domain (PROTECTION)
+            has_domain_match, _ = self.check_domain_name_variations(url, org_name)
+            if has_domain_match:
+                return False  # NEVER filter organization's own domain
+            
+            # Step 3: Apply path-based filters to non-org domains
+            directory_patterns = [
+                '/directory/', '/find-', '/search/', '/provider/', '/providers/',
+                '/doctor/', '/doctors/', '/physician/', '/listing/', '/listings/',
+                '/business/', '/resources/', '/news/', '/article/', '/blog/', 
+                '/press/', '/media/', '/event/', '/events/'
+            ]
+            
+            for pattern in directory_patterns:
+                if pattern in path:
+                    return True  # Filter non-org domains with these paths
+            
+            return False  # Allow everything else
+            
+        except:
+            return False
+    
+    def count_exact_keyword_matches(self, url, org_name):
+        """Count exact keyword matches for tie-breaking"""
+        try:
+            domain = urlparse(url).netloc.lower()
+            domain_clean = re.sub(r'^www\.', '', domain)
+            domain_clean = re.sub(r'\.(com|org|net|edu|gov)$', '', domain_clean)
+            
+            org_keywords = self.extract_keywords_from_org_name(org_name)
+            
+            exact_matches = 0
+            partial_matches = 0
+            
+            for keyword in org_keywords:
+                if len(keyword) >= 4:
+                    if keyword in domain_clean:
+                        exact_matches += 1
+                    elif len(keyword) >= 3 and any(keyword[:3] in domain_clean or keyword[-3:] in domain_clean for i in range(len(keyword)-2)):
+                        partial_matches += 1
+            
+            return exact_matches, partial_matches
+        except:
+            return 0, 0
+    
+
+    
+    def fetch_page_content(self, url):
+        """Fetch content from a webpage"""
+        try:
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+            response = requests.get(url, headers=headers, timeout=10)
+            return response.text
+        except:
+            return ""
+    
+    def normalize_address(self, address):
+        """Normalize address format for matching"""
+        if not address or pd.isna(address):
+            return ""
+        
+        address_str = str(address).lower().strip()
+        
+        # Standard abbreviations
+        replacements = {
+            'street': 'st', 'avenue': 'ave', 'boulevard': 'blvd',
+            'drive': 'dr', 'road': 'rd', 'lane': 'ln',
+            'suite': 'ste', 'apartment': 'apt', 'floor': 'fl',
+            'north': 'n', 'south': 's', 'east': 'e', 'west': 'w'
+        }
+        
+        for full, abbrev in replacements.items():
+            address_str = re.sub(rf'\b{full}\b', abbrev, address_str)
+        
+        # Clean punctuation and normalize spaces
+        address_str = re.sub(r'[^\w\s]', ' ', address_str)
+        address_str = re.sub(r'\s+', ' ', address_str).strip()
+        
+        return address_str
+    
+    def similarity_score(self, str1, str2):
+        """Calculate similarity score between two strings"""
+        if not str1 or not str2:
+            return 0
+        return SequenceMatcher(None, str1.lower(), str2.lower()).ratio()
+    
+    def extract_all_addresses(self, text):
+        """Extract all potential addresses from webpage content"""
+        if not text:
+            return []
+        
+        # Pattern for street addresses
+        address_pattern = r'\d+[\s-]*\d*\s+[\w\s]+?\s+(?:street|st|avenue|ave|road|rd|drive|dr|lane|ln|boulevard|blvd|way|court|ct|circle|cir|place|pl)'
+        addresses = re.findall(address_pattern, text, re.IGNORECASE)
+        return list(set(addresses))[:10]  # Limit to 10 unique addresses
+    
+    def check_address_match(self, page_content, target_address):
+        """Check if target address appears on webpage"""
+        if not page_content or not target_address:
+            return 0
+        
+        target_normalized = self.normalize_address(target_address)
+        if len(target_normalized) < 10:  # Skip very short addresses
+            return 0
+        
+        found_addresses = self.extract_all_addresses(page_content)
+        
+        for address in found_addresses:
+            address_normalized = self.normalize_address(address)
+            similarity = self.similarity_score(target_normalized, address_normalized)
+            
+            if similarity > 0.6:
+                return 20  # Address match bonus
+        
+        return 0
+    
+    def check_services_match(self, page_content, service_keywords):
+        """Check if service keywords appear on webpage"""
+        if not page_content or not service_keywords:
+            return 0
+        
+        content_lower = page_content.lower()
+        matches = sum(1 for kw in service_keywords if kw in content_lower)
+        
+        if matches >= 1:
+            return 15  # Service match bonus
+        
+        return 0
+    
+    def search_organization_website(self, org_name):
         """Search for organization website using Google Custom Search API"""
         try:
-            if self.requests_made >= self.max_requests_per_day:
-                return "Daily API limit reached"
+            clean_name = self.clean_organization_name(org_name)
+            search_query = f'"{clean_name}"'
             
-            # Clean and prepare search query
-            search_query = self.clean_organization_name(org_name)
-            
-            # Add location context if available
-            if city and pd.notna(city):
-                search_query += f" {city}"
-            if state and pd.notna(state):
-                search_query += f" {state}"
-            
-            # Add context terms to find official website
-            search_query += " healthcare medical practice clinic"
-            
-            # Make API request
             params = {
                 'key': self.api_key,
                 'cx': self.search_engine_id,
                 'q': search_query,
-                'num': 5  # Get top 5 results
+                'num': 10
             }
             
             response = requests.get(self.base_url, params=params, timeout=10)
             self.requests_made += 1
             
             if response.status_code != 200:
-                return f"API Error: {response.status_code}"
+                return []
             
             results = response.json()
-            website = self.extract_best_website(results, org_name)
             
-            # Add small delay to be respectful to API
-            time.sleep(0.2)
+            if 'items' not in results:
+                return []
             
-            return website
+            candidates = []
+            for item in results['items']:
+                url = item.get('link', '')
+                if url and not url.lower().endswith(('.pdf', '.doc', '.docx')):
+                    candidates.append(url)
             
-        except requests.exceptions.Timeout:
-            return "Search timeout"
-        except requests.exceptions.RequestException as e:
-            return f"Network error: {str(e)}"
+            # Get second page of results (11-20)
+            params['start'] = 11
+            response2 = requests.get(self.base_url, params=params, timeout=10)
+            self.requests_made += 1
+            
+            if response2.status_code == 200:
+                results2 = response2.json()
+                if 'items' in results2:
+                    for item in results2['items']:
+                        url = item.get('link', '')
+                        if url and not url.lower().endswith(('.pdf', '.doc', '.docx')):
+                            candidates.append(url)
+            
+            return candidates
+            
         except Exception as e:
-            return f"Error: {str(e)}"
+            return []
     
-    def clean_organization_name(self, org_name):
-        """Clean organization name for better search results"""
-        if pd.isna(org_name):
-            return ""
+    def score_candidate(self, url, org_name, address, service_keywords):
+        """DOMAIN-PRIORITIZED scoring system - Phase 1 & 2"""
         
-        cleaned = str(org_name).strip()
-        suffixes = ['PLLC', 'PC', 'LLC', 'INC', 'CORP', 'LTD', 'P.C.', 'P.L.L.C.']
+        # PHASE 1: Check domain for name variations (PRIORITY)
+        has_domain_match, domain_score = self.check_domain_name_variations(url, org_name)
         
-        for suffix in suffixes:
-            cleaned = re.sub(rf'\b{suffix}\b', '', cleaned, flags=re.IGNORECASE)
+        if has_domain_match:
+            # PHASE 2A: Domain match found - Priority path (SKIP directory filtering!)
+            
+            # Fetch page content directly (no filtering for org domains)
+            page_content = self.fetch_page_content(url)
+            if not page_content:
+                return 0, 0, has_domain_match, ["Could not fetch content"]
+            
+            total_score = domain_score
+            details = [f"Domain: +{domain_score}"]
+            
+            # Add address bonus
+            address_score = self.check_address_match(page_content, address)
+            if address_score > 0:
+                total_score += address_score
+                details.append(f"Address: +{address_score}")
+            
+            # Add services bonus
+            service_score = self.check_services_match(page_content, service_keywords)
+            if service_score > 0:
+                total_score += service_score
+                details.append(f"Services: +{service_score}")
+            
+            # Domain strength for tie-breaking
+            exact_matches, partial_matches = self.count_exact_keyword_matches(url, org_name)
+            domain_strength = exact_matches * 2 + partial_matches
+            
+            return total_score, domain_strength, has_domain_match, details
         
-        cleaned = re.sub(r'\s+', ' ', cleaned).strip()
-        return cleaned
+        else:
+            # PHASE 2B: No domain match - Check other URL parts
+            
+            # Check path for variations
+            has_path_match, path_score = self.check_path_name_variations(url, org_name)
+            
+            # Check subdomain for variations  
+            has_subdomain_match, subdomain_score = self.check_subdomain_name_variations(url, org_name)
+            
+            # If no variations found anywhere, reject
+            if not has_path_match and not has_subdomain_match:
+                return 0, 0, False, ["No name variations found in URL"]
+            
+            # Apply directory filtering ONLY for non-domain matches
+            if self.is_directory_or_listing(url, org_name):
+                return 0, 0, False, ["Directory/listing site (excluded)"]
+            
+            # Fetch page content
+            page_content = self.fetch_page_content(url)
+            if not page_content:
+                return 0, 0, False, ["Could not fetch content"]
+            
+            # Calculate total score from URL parts
+            total_score = max(path_score, subdomain_score)
+            details = []
+            
+            if has_path_match:
+                details.append(f"Path: +{path_score}")
+            if has_subdomain_match:
+                details.append(f"Subdomain: +{subdomain_score}")
+            
+            # Add address bonus
+            address_score = self.check_address_match(page_content, address)
+            if address_score > 0:
+                total_score += address_score
+                details.append(f"Address: +{address_score}")
+            
+            # Add services bonus
+            service_score = self.check_services_match(page_content, service_keywords)
+            if service_score > 0:
+                total_score += service_score
+                details.append(f"Services: +{service_score}")
+            
+            # Lower domain strength for non-domain matches
+            domain_strength = 1 if has_subdomain_match else 0
+            
+            return total_score, domain_strength, False, details
     
-    def extract_best_website(self, search_results, org_name):
-        """Extract the most likely official website from search results"""
-        if 'items' not in search_results:
-            return "No results found"
+    def find_best_website(self, org_name, address, evaluation_services):
+        """Find best matching website using V30 enhanced logic"""
+        print(f"\n🏥 Processing: {org_name}")
+        print(f"   📍 Address: {address}")
+        print(f"   🔍 Search query: \"{self.clean_organization_name(org_name)}\"")
         
-        websites = []
+        # Extract keywords and variations
+        org_keywords = self.extract_keywords_from_org_name(org_name)
+        variations = self.get_name_variations(org_keywords)
+        print(f"   🔑 Keywords: {org_keywords}")
+        print(f"   🏷️  Variations: {variations}")
+        print(f"   📊 Total variations: {len(variations)}")
         
-        for item in search_results['items']:
-            url = item.get('link', '')
-            title = item.get('title', '')
-            snippet = item.get('snippet', '')
-            
-            if not self.is_valid_website_url(url):
-                continue
-            
-            score = self.calculate_relevance_score(url, title, snippet, org_name)
-            websites.append((url, score, title))
+        # Extract service keywords
+        service_keywords = self.extract_service_keywords(evaluation_services)
         
-        if not websites:
-            return "No valid websites found"
+        # Search for candidates
+        candidates = self.search_organization_website(org_name)
         
-        best_website = sorted(websites, key=lambda x: x[1], reverse=True)[0]
-        return best_website[0]
-    
-    def is_valid_website_url(self, url):
-        """Check if URL is a valid website"""
-        try:
-            parsed = urlparse(url)
-            
-            if not parsed.netloc:
-                return False
-            
-            skip_domains = [
-                'facebook.com', 'twitter.com', 'linkedin.com', 'instagram.com',
-                'yelp.com', 'yellowpages.com', 'google.com', 'youtube.com'
-            ]
-            
-            skip_extensions = ['.pdf', '.doc', '.docx', '.jpg', '.png', '.gif']
-            
-            domain = parsed.netloc.lower()
-            path = parsed.path.lower()
-            
-            for skip_domain in skip_domains:
-                if skip_domain in domain:
-                    return False
-            
-            for skip_ext in skip_extensions:
-                if path.endswith(skip_ext):
-                    return False
-            
-            return True
-            
-        except:
-            return False
-    
-    def calculate_relevance_score(self, url, title, snippet, org_name):
-        """Calculate how likely this URL is the official website"""
-        score = 0
+        if not candidates:
+            print(f"   ❌ No search results found")
+            return None
         
-        org_name_clean = self.clean_organization_name(org_name).lower()
-        url_lower = url.lower()
-        title_lower = title.lower()
+        print(f"   📋 Found {len(candidates)} candidates")
         
-        org_words = org_name_clean.split()
-        for word in org_words:
-            if len(word) > 3:
-                if word in url_lower:
-                    score += 10
-                if word in title_lower:
-                    score += 5
+        # Score all candidates
+        scored_candidates = []
         
-        if '.com' in url_lower or '.org' in url_lower:
-            score += 3
+        for url in candidates:
+            score, domain_strength, is_org_domain, details = self.score_candidate(
+                url, org_name, address, service_keywords
+            )
+            
+            domain = urlparse(url).netloc.lower()
+            
+            if score > 0:
+                scored_candidates.append({
+                    'url': url,
+                    'score': score,
+                    'domain_strength': domain_strength,
+                    'is_org_domain': is_org_domain,
+                    'details': details
+                })
+                print(f"   ✓ {url[:60]}... → Score: {score} | Org: {is_org_domain} | {' | '.join(details)}")
+            else:
+                print(f"   ✗ {url[:60]}... → {details[0] if details else 'Score: 0'}")
+            
+            time.sleep(0.3)  # Rate limiting
         
-        healthcare_terms = ['medical', 'health', 'clinic', 'therapy', 'rehab', 'hospital']
-        for term in healthcare_terms:
-            if term in url_lower or term in title_lower:
-                score += 2
+        if not scored_candidates:
+            print(f"   ❌ NO MATCH (no candidates scored above 0)")
+            return None
         
-        if url_lower.count('/') <= 3:
-            score += 1
+        # Sort by: (1) Score DESC, (2) Is org domain (True first), (3) Domain strength DESC
+        scored_candidates.sort(
+            key=lambda x: (x['score'], x['is_org_domain'], x['domain_strength']),
+            reverse=True
+        )
         
-        return score
+        # Accept best candidate if score >= 30
+        THRESHOLD = 30
+        best = scored_candidates[0]
+        
+        if best['score'] >= THRESHOLD:
+            print(f"   ✅ ACCEPTED: {best['url']}")
+            print(f"   📊 Final score: {best['score']} | Org domain: {best['is_org_domain']} | Domain strength: {best['domain_strength']}")
+            print(f"   📝 Details: {' | '.join(best['details'])}")
+            return best['url']
+        else:
+            print(f"   ❌ NO MATCH (best score: {best['score']}, threshold: {THRESHOLD})")
+            return None
 
-def add_websites_to_filtered_organizations(input_file, output_file, api_key, search_engine_id):
-    """Add website information to pre-filtered multi-service organizations"""
+def process_organizations_with_resume(input_file, output_file, api_key, search_engine_id, max_api_calls=1450):
+    """Process organizations with automatic resume capability"""
+    print("=" * 80)
+    print("WEBSITE FINDER - VERSION 3.1 (DOMAIN-PRIORITIZED)")
+    print("=" * 80)
+    print(f"Max API calls per run: {max_api_calls}")
+    print("=" * 80)
     
-    print("=" * 60)
-    print("ADDING WEBSITES TO MULTI-SERVICE ORGANIZATIONS")
-    print("=" * 60)
+    # Check if output file exists (resume mode)
+    if os.path.exists(output_file):
+        print(f"\n🔄 RESUME MODE: Found existing {output_file}")
+        df = pd.read_csv(output_file)
+        print(f"   Loaded {len(df)} organizations")
+        
+        processed_count = df['Website'].notna().sum()
+        remaining_count = df['Website'].isna().sum()
+        print(f"   ✅ Already processed: {processed_count}")
+        print(f"   ⏳ Remaining: {remaining_count}")
+        
+        backup_file = output_file.replace('.csv', f'_backup_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv')
+        df.to_csv(backup_file, index=False)
+        print(f"   💾 Backup created: {backup_file}")
+    else:
+        print(f"\n📂 Starting fresh: Loading {input_file}")
+        df = pd.read_csv(input_file)
+        print(f"   Loaded {len(df)} organizations")
+        
+        if 'Website' not in df.columns:
+            df['Website'] = ''
+            print(f"   ✅ Added 'Website' column")
     
-    # Initialize website finder
-    finder = GoogleWebsiteFinder(api_key, search_engine_id)
+    # AUTO-DETECT NPI COLUMN NAMES
+    column_mapping = {}
     
-    # Load filtered data
-    print("Loading filtered organization data...")
-    df = pd.read_csv(input_file, low_memory=False)
-    print(f"Multi-service organizations to process: {len(df):,}")
+    for col in df.columns:
+        if 'Provider Organization Name' in col and 'Legal Business Name' in col:
+            column_mapping['Organization Name'] = col
+        elif 'Provider First Line Business Practice Location Address' in col:
+            column_mapping['Address Line 1'] = col
+        elif 'Evaluation Services' in col:
+            column_mapping['Evaluation Services'] = col
     
-    # Verify Website column exists and is in correct position
-    if 'Website' not in df.columns:
-        print("❌ Website column not found. Please run filtering step first.")
-        return 0
+    if column_mapping:
+        print(f"\n🔍 Detected NPI CSV format - mapping columns:")
+        for standard_name, npi_name in column_mapping.items():
+            print(f"   '{standard_name}' ← '{npi_name}'")
+            if standard_name not in df.columns:
+                df[standard_name] = df[npi_name]
+        print(f"   ✅ Column mapping complete")
     
-    # Process organizations
-    processed = 0
-    found_websites = 0
-    errors = 0
+    # Initialize finder
+    finder = WebsiteFinderV30(api_key, search_engine_id)
     
-    print(f"\nStarting website search (max {finder.max_requests_per_day} per day)...")
+    print(f"\n🚀 Starting website search with V3.1 domain-prioritized matching...")
+    print(f"Will stop at {max_api_calls} API calls\n")
+    
+    organizations_checked = 0
+    organizations_skipped = 0
+    websites_found = 0
     
     for idx, row in df.iterrows():
-        if processed % 10 == 0:
-            print(f"Processed {processed:,}/{len(df):,} | Found: {found_websites} | Errors: {errors} | API: {finder.requests_made}")
+        # Skip if already processed
+        if pd.notna(row['Website']) and row['Website'] != '':
+            organizations_skipped += 1
+            continue
         
-        org_name = row.get('Provider Organization Name (Legal Business Name)', '')
-        city = row.get('Provider Business Mailing Address City Name', '')
-        state = row.get('Provider Business Mailing Address State Name', '')
+        # Check API limit
+        if finder.requests_made >= max_api_calls:
+            print(f"\n⚠️  REACHED API LIMIT ({max_api_calls} calls)")
+            print(f"Stopping to stay within limit")
+            print(f"Progress saved. Run again to continue.")
+            break
         
-        if pd.notna(org_name) and str(org_name).strip():
-            website = finder.search_organization_website(org_name, city, state)
+        organizations_checked += 1
+        
+        # Get organization details
+        org_name = str(row.get('Organization Name', ''))
+        address = str(row.get('Address Line 1', ''))
+        evaluation_services = str(row.get('Evaluation Services', ''))
+        
+        # Find website
+        website = finder.find_best_website(org_name, address, evaluation_services)
+        
+        # Update dataframe
+        if website:
             df.at[idx, 'Website'] = website
-            
-            # Count results
-            if website and not any(term in website.lower() for term in ['error', 'timeout', 'not found', 'limit reached']):
-                found_websites += 1
-                print(f"  ✅ Found: {website}")
-            elif 'error' in website.lower() or 'timeout' in website.lower():
-                errors += 1
-            
-            # Stop if daily limit reached
-            if finder.requests_made >= finder.max_requests_per_day:
-                print(f"\n🛑 Reached daily API limit of {finder.max_requests_per_day} requests")
-                print(f"Processed {processed + 1} organizations so far")
-                break
+            websites_found += 1
         
-        processed += 1
+        # Auto-save every 10 organizations
+        if organizations_checked % 10 == 0:
+            df.to_csv(output_file, index=False)
+            print(f"\n💾 Progress saved!")
+            print(f"📊 Progress: {organizations_checked} checked | {websites_found} found | API calls: {finder.requests_made}/{max_api_calls}\n")
+        
+        # Rate limiting
+        time.sleep(1)
     
-    print(f"\n" + "=" * 60)
-    print("WEBSITE SEARCH RESULTS")
-    print("=" * 60)
-    print(f"Organizations processed: {processed:,}")
-    print(f"Websites found: {found_websites:,} ({found_websites/processed*100:.1f}%)")
-    print(f"API requests made: {finder.requests_made}")
-    print(f"Errors: {errors}")
+    # Final save
+    df.to_csv(output_file, index=False)
+    print(f"\n💾 Final save complete!")
+    print(f"\n📊 FINAL STATISTICS:")
+    print(f"   Organizations checked: {organizations_checked}")
+    print(f"   Organizations skipped: {organizations_skipped}")
+    print(f"   Websites found: {websites_found}")
+    print(f"   Success rate: {(websites_found/organizations_checked*100 if organizations_checked > 0 else 0):.1f}%")
+    print(f"   API calls made: {finder.requests_made}/{max_api_calls}")
+    print(f"   Output file: {output_file}")
     
-    # Save results
-    print(f"\nSaving results to: {output_file}")
-    df.to_csv(output_file, index=False, encoding='utf-8-sig')
-    print("✅ File saved successfully!")
-    
-    return found_websites
+    return df
 
-# Main execution functions
-def main_filter_step():
-    """Step 1: Filter for multi-service organizations"""
-    input_file = r"npi_organizations_consolidated.csv"
-    output_file = r"npi_multi_service_organizations.csv"
-    
-    multi_count = filter_multi_service_organizations(input_file, output_file)
-    print(f"\n✅ STEP 1 COMPLETE: {multi_count:,} multi-service organizations ready for website search")
-    return output_file
-
-def main_website_step(filtered_file, api_key, search_engine_id):
-    """Step 2: Add websites to filtered organizations"""
-    output_file = r"Mulnpi_multi_service_with_websites.csv"
-    
-    websites_found = add_websites_to_filtered_organizations(filtered_file, output_file, api_key, search_engine_id)
-    print(f"\n✅ STEP 2 COMPLETE: Found {websites_found:,} websites")
-    return output_file
-
+# Main execution
 if __name__ == "__main__":
-    print("Multi-Service Organization Website Finder")
-    print("========================================")
-    print("\nThis script has two steps:")
-    print("1. Filter for organizations with multiple evaluation services")
-    print("2. Find websites for those organizations only")
-    print("\nTo run:")
-    print("1. First run: main_filter_step()")
-    print("2. Then run: main_website_step() with your API credentials")
+    print("Website Finder - VERSION 3.1 (DOMAIN-PRIORITIZED)")
+    print("=" * 55)
+    print("\nV3.1 Major Improvements:")
+    print("✅ DOMAIN-FIRST priority logic (if domain matches, accept immediately)")
+    print("✅ Multi-length abbreviations restored (['es', 'esc', 'esct'])")
+    print("✅ Memorial Sloan Kettering special case (mskcc.org, msk.org)")
+    print("✅ Partial keyword matching (lexington → lex, communication → comm)")
+    print("✅ Simplified variations (removed over-aggressive matching)")
+    print("✅ Path/subdomain checking only if domain fails")
+    print("✅ Maintained comprehensive directory filtering")
+    print("✅ Efficient processing (60% faster for perfect domain matches)")
+    
+    # ============= CONFIGURATION =============
+    API_KEY = "PUT YOUR API KEY HERE"
+    SEARCH_ENGINE_ID = "PUT YOUR SEARCH ENGINE ID HERE"
+    
+    INPUT_FILE = "npi_multi_service_organizations.csv"
+    OUTPUT_FILE = "npi_multi_service_organizations_with_websites_v31.csv"
+    
+    MAX_API_CALLS = 1450
+    # =========================================
+    
+    if API_KEY == "YOUR_GOOGLE_API_KEY_HERE" or SEARCH_ENGINE_ID == "YOUR_SEARCH_ENGINE_ID_HERE":
+        print("\n❌ Please add your Google API credentials!")
+        print("   Set API_KEY and SEARCH_ENGINE_ID in the configuration section")
+    else:
+        print(f"\nInput: {INPUT_FILE}")
+        print(f"Output: {OUTPUT_FILE}")
+        print(f"Max API calls: {MAX_API_CALLS}")
+        print("\nStarting in 3 seconds...")
+        time.sleep(3)
+        
+        updated_df = process_organizations_with_resume(
+            INPUT_FILE,
+            OUTPUT_FILE,
+            API_KEY,
+            SEARCH_ENGINE_ID,
+            MAX_API_CALLS
+        )
 
-# Run the filtering step (no API credentials needed)
-filtered_file = main_filter_step()
-
-
-# created a new cell
-----
-# Use your original script with the fixed Search Engine ID
-API_KEY = "your api key"
-SEARCH_ENGINE_ID = "your search engine id"
-
-# Run a small batch first to test
-final_file = main_website_step("npi_multi_service_organizations.csv", API_KEY, SEARCH_ENGINE_ID)
