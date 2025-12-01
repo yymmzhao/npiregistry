@@ -772,6 +772,30 @@ def process_organizations_with_resume(input_file, output_file, api_key, search_e
             df.at[idx, 'Processed'] = True  # Mark as processed so it doesn't retry
             organizations_skipped += 1
             continue
+
+        if "THRIVE PSYCHOLOGICAL SERVICES PLLC" in org_name.upper():
+            print(f"⏭️  SKIPPING (problematic): {org_name}")
+            df.at[idx, 'Processed'] = True  # Mark as processed so it doesn't retry
+            organizations_skipped += 1
+            continue
+
+        if "INTEGRATIVE PSYCHOLOGICAL SERVICES, PLLC" in org_name.upper():
+            print(f"⏭️  SKIPPING (problematic): {org_name}")
+            df.at[idx, 'Processed'] = True  # Mark as processed so it doesn't retry
+            organizations_skipped += 1
+            continue
+
+        if "SPEAK, LEARN, AND PLAY, LLC" in org_name.upper():
+            print(f"⏭️  SKIPPING (problematic): {org_name}")
+            df.at[idx, 'Processed'] = True  # Mark as processed so it doesn't retry
+            organizations_skipped += 1
+            continue
+    
+        if "CITYLINK PSYCHOLOGICAL SERVICES, PLLC" in org_name.upper():
+            print(f"⏭️  SKIPPING (problematic): {org_name}")
+            df.at[idx, 'Processed'] = True  # Mark as processed so it doesn't retry
+            organizations_skipped += 1
+            continue
         
         # Check API limit
         if finder.requests_made >= max_api_calls:
