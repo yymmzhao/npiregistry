@@ -796,6 +796,54 @@ def process_organizations_with_resume(input_file, output_file, api_key, search_e
             df.at[idx, 'Processed'] = True  # Mark as processed so it doesn't retry
             organizations_skipped += 1
             continue
+
+        if "MAX MALITZKY LLC" in org_name.upper():
+            print(f"⏭️  SKIPPING (problematic): {org_name}")
+            df.at[idx, 'Processed'] = True  # Mark as processed so it doesn't retry
+            organizations_skipped += 1
+            continue
+
+        if "GROUNDWORK THERAPY PSYCHOLOGICAL SERVICES, PLLC" in org_name.upper():
+            print(f"⏭️  SKIPPING (problematic): {org_name}")
+            df.at[idx, 'Processed'] = True  # Mark as processed so it doesn't retry
+            organizations_skipped += 1
+            continue
+
+        if "ALEXANDRA PETROU" in org_name.upper():
+            print(f"⏭️  SKIPPING (problematic): {org_name}")
+            df.at[idx, 'Processed'] = True  # Mark as processed so it doesn't retry
+            organizations_skipped += 1
+            continue
+
+        if "NEW PERSPECTIVE PSYCHOLOGICAL SERVICES" in org_name.upper():
+            print(f"⏭️  SKIPPING (problematic): {org_name}")
+            df.at[idx, 'Processed'] = True  # Mark as processed so it doesn't retry
+            organizations_skipped += 1
+            continue
+
+        if "ANGELA YEUNG PSY.D. PLLC" in org_name.upper():
+            print(f"⏭️  SKIPPING (problematic): {org_name}")
+            df.at[idx, 'Processed'] = True  # Mark as processed so it doesn't retry
+            organizations_skipped += 1
+            continue
+
+        if "ELITE MOVEMENT INITIATIVE LLC" in org_name.upper():
+            print(f"⏭️  SKIPPING (problematic): {org_name}")
+            df.at[idx, 'Processed'] = True  # Mark as processed so it doesn't retry
+            organizations_skipped += 1
+            continue
+
+        if "WELLNESS ROAD PSYCHOLOGY, PLLC" in org_name.upper():
+            print(f"⏭️  SKIPPING (problematic): {org_name}")
+            df.at[idx, 'Processed'] = True  # Mark as processed so it doesn't retry
+            organizations_skipped += 1
+            continue
+
+        if "BROOKLYN INTEGRATIVE PSYCHOLOGICAL SERVICES, P.L.L.C." in org_name.upper():
+            print(f"⏭️  SKIPPING (problematic): {org_name}")
+            df.at[idx, 'Processed'] = True  # Mark as processed so it doesn't retry
+            organizations_skipped += 1
+            continue
         
         # Check API limit
         if finder.requests_made >= max_api_calls:
