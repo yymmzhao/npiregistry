@@ -1,0 +1,385 @@
+The script will be run by chunk sequentially
+
+# Make sure you have the required packages
+!pip install requests beautifulsoup4 pandas
+---
+
+MAIN SCRIPT STARTS BELOW THIS LINE
+---
+NPI Keyword Crawler - Ultra Simple Version
+Just paste this in ONE cell and click RUN - that's it!
+"""
+
+import requests
+from bs4 import BeautifulSoup
+from urllib.parse import urljoin, urlparse
+import pandas as pd
+import logging
+import time
+from datetime import datetime
+import json
+import os
+from typing import Set, List, Dict, Optional, Tuple
+import glob
+
+# ============================================================================
+# CONFIGURATION - EDIT THESE PATHS ONLY
+# ============================================================================
+INPUT_FILE = r"C:\Users\Yueming Zhao\Desktop\Multidisciplinary IEP-Related Evaluations\NPI\npi_specialty_practice_multi_specialty_with_websites_manually_checked.csv"
+OUTPUT_DIR = r"C:\Users\Yueming Zhao\Desktop\Multidisciplinary IEP-Related Evaluations\NPI\Results"
+CHUNK_SIZE = 200  # Process 200 records per chunk
+# ============================================================================
+
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+
+class CheckpointManager:
+    def __init__(self, checkpoint_dir=".crawl_checkpoints"):
+        self.checkpoint_dir = checkpoint_dir
+        os.makedirs(checkpoint_dir, exist_ok=True)
+    
+    def get_path(self, file_hash, chunk_num=None):
+        if chunk_num:
+            return os.path.join(self.checkpoint_dir, f"checkpoint_{file_hash}_chunk{chunk_num}.json")
+        return os.path.join(self.checkpoint_dir, f"checkpoint_{file_hash}.json")
+    
+    def load(self, file_hash, chunk_num=None):
+        path = self.get_path(file_hash, chunk_num)
+        if os.path.exists(path):
+            try:
+                with open(path, 'r') as f:
+                    checkpoint = json.load(f)
+                logger.info(f"✅ Resumed from row {checkpoint.get('last_processed_idx', 0)}")
+                return checkpoint
+            except:
+                return None
+        return None
+    
+    def save(self, file_hash, data, chunk_num=None):
+        path = self.get_path(file_hash, chunk_num)
+        try:
+            with open(path, 'w') as f:
+                json.dump(data, f, indent=2)
+        except:
+            pass
+    
+    def delete(self, file_hash, chunk_num=None):
+        path = self.get_path(file_hash, chunk_num)
+        if os.path.exists(path):
+            try:
+                os.remove(path)
+            except:
+                pass
+
+
+class KeywordCrawler:
+    KEYWORDS = [
+        "IEP", "Individualized Education Program", "IEPs",
+        "Impartial Hearing", "Impartial Hearings",
+        "School Observation", "School Observations"
+    ]
+    
+    def __init__(self):
+        self.session = requests.Session()
+        self.session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        })
+        self.global_visited_urls = {}
+        self.global_found_results = {}
+        self.global_all_links = {}
+        self.domain_access_count = {}
+    
+    def extract_domain(self, url):
+        try:
+            return urlparse(url).netloc.lower()
+        except:
+            return ""
+    
+    def fetch_page(self, url):
+        try:
+            response = self.session.get(url, timeout=10)
+            response.raise_for_status()
+            return BeautifulSoup(response.content, 'html.parser'), True
+        except:
+            return None, False
+    
+    def extract_text(self, soup):
+        try:
+            for script in soup(["script", "style"]):
+                script.decompose()
+            text = soup.get_text()
+            lines = (line.strip() for line in text.splitlines())
+            chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+            return ' '.join(chunk for chunk in chunks if chunk)
+        except:
+            return ""
+    
+    def find_keywords(self, text):
+        found = []
+        text_lower = text.lower()
+        for keyword in self.KEYWORDS:
+            if keyword.lower() in text_lower:
+                found.append(keyword)
+        return found
+    
+    def get_links(self, soup, base_url):
+        links = set()
+        try:
+            for link in soup.find_all('a', href=True):
+                url = link['href']
+                absolute_url = urljoin(base_url, url)
+                if absolute_url.startswith(('http://', 'https://')):
+                    links.add(absolute_url.split('#')[0])
+        except:
+            pass
+        return links
+    
+    def crawl_website(self, website_url):
+        try:
+            domain = self.extract_domain(website_url)
+            
+            if domain not in self.global_visited_urls:
+                self.global_visited_urls[domain] = set()
+                self.global_found_results[domain] = {}
+                self.global_all_links[domain] = set()
+            
+            if domain not in self.domain_access_count:
+                self.domain_access_count[domain] = 0
+            self.domain_access_count[domain] += 1
+            access_number = self.domain_access_count[domain]
+            
+            to_visit = [website_url]
+            
+            # Phase 1: Same domain pages
+            same_domain_count = 0
+            while to_visit and same_domain_count < 20:
+                current_url = to_visit.pop(0)
+                
+                if current_url in self.global_visited_urls[domain]:
+                    continue
+                if self.extract_domain(current_url) != domain:
+                    continue
+                
+                self.global_visited_urls[domain].add(current_url)
+                same_domain_count += 1
+                
+                soup, success = self.fetch_page(current_url)
+                if not success:
+                    time.sleep(0.5)
+                    continue
+                
+                text = self.extract_text(soup)
+                keywords_found = self.find_keywords(text)
+                
+                if keywords_found:
+                    for keyword in keywords_found:
+                        logger.info(f"   ✓ Found: '{keyword}' on {current_url}")
+                        if keyword not in self.global_found_results[domain]:
+                            self.global_found_results[domain][keyword] = set()
+                        self.global_found_results[domain][keyword].add(current_url)
+                
+                new_links = self.get_links(soup, current_url)
+                self.global_all_links[domain].update(new_links)
+                
+                for link in new_links:
+                    if link not in self.global_visited_urls[domain] and link not in to_visit:
+                        to_visit.append(link)
+                
+                time.sleep(0.5)
+            
+            # Phase 2: External pages (only first access)
+            if access_number == 1 and self.global_all_links[domain]:
+                external_links = [link for link in self.global_all_links[domain] 
+                                 if self.extract_domain(link) != domain]
+                external_count = 0
+                
+                for external_url in external_links:
+                    if external_count >= 20:
+                        break
+                    if external_url in self.global_visited_urls[domain]:
+                        continue
+                    
+                    self.global_visited_urls[domain].add(external_url)
+                    external_count += 1
+                    
+                    soup, success = self.fetch_page(external_url)
+                    if not success:
+                        time.sleep(0.5)
+                        continue
+                    
+                    text = self.extract_text(soup)
+                    keywords_found = self.find_keywords(text)
+                    
+                    if keywords_found:
+                        for keyword in keywords_found:
+                            logger.info(f"   ✓ Found: '{keyword}' on external page {external_url}")
+                            if keyword not in self.global_found_results[domain]:
+                                self.global_found_results[domain][keyword] = set()
+                            self.global_found_results[domain][keyword].add(external_url)
+                    
+                    time.sleep(0.5)
+            
+            # Format results
+            if self.global_found_results[domain]:
+                result_strings = []
+                for keyword in self.KEYWORDS:
+                    if keyword in self.global_found_results[domain]:
+                        urls = sorted(list(self.global_found_results[domain][keyword]))
+                        for url in urls:
+                            result_strings.append(f"{keyword}: {url}")
+                return " | ".join(result_strings)
+            else:
+                return "not found"
+        
+        except Exception as e:
+            logger.error(f"Error crawling {website_url}: {e}")
+            return "not found"
+
+
+# ============================================================================
+# MAIN PROCESSING - RUNS AUTOMATICALLY
+# ============================================================================
+
+print("\n" + "█"*80)
+print("🚀 NPI KEYWORD CRAWLER - STARTING AUTOMATED PROCESSING")
+print("█"*80 + "\n")
+
+checkpoint_mgr = CheckpointManager()
+file_hash = str(hash(INPUT_FILE))[-8:]
+
+# Load data
+print(f"📂 Loading file: {INPUT_FILE}")
+df = pd.read_csv(INPUT_FILE)
+total_rows = len(df)
+print(f"✅ Loaded {total_rows} rows\n")
+
+# Add new column if needed
+new_col_name = 'Keywords crawling: IEP, impartial hearing, and school observation'
+try:
+    processed_col_idx = df.columns.get_loc('Processed')
+    if new_col_name not in df.columns:
+        df.insert(processed_col_idx + 1, new_col_name, '')
+except KeyError:
+    print("❌ ERROR: 'Processed' column not found in CSV")
+    raise
+
+# Calculate chunks
+num_chunks = (total_rows + CHUNK_SIZE - 1) // CHUNK_SIZE
+
+print(f"📊 CONFIGURATION:")
+print(f"  • Total records: {total_rows}")
+print(f"  • Chunk size: {CHUNK_SIZE} records/chunk")
+print(f"  • Total chunks: {num_chunks}")
+print(f"\n" + "█"*80 + "\n")
+
+crawler = KeywordCrawler()
+overall_start = time.time()
+all_chunk_files = []
+
+# Process each chunk
+for chunk_num in range(1, num_chunks + 1):
+    chunk_start = (chunk_num - 1) * CHUNK_SIZE
+    chunk_end = min(chunk_num * CHUNK_SIZE, total_rows)
+    
+    print(f"\n{'─'*80}")
+    print(f"🔄 CHUNK {chunk_num}/{num_chunks} - Processing rows {chunk_start} to {chunk_end-1}")
+    print(f"{'─'*80}\n")
+    
+    chunk_start_time = time.time()
+    
+    # Load checkpoint
+    checkpoint = checkpoint_mgr.load(file_hash, chunk_num)
+    start_idx = chunk_start
+    processed_count = 0
+    
+    if checkpoint:
+        start_idx = checkpoint.get('last_processed_idx', chunk_start) + 1
+        processed_count = checkpoint.get('processed_count', 0)
+        print(f"✅ Resuming from row {start_idx}\n")
+    
+    # Process rows
+    for idx in range(start_idx, chunk_end):
+        row = df.iloc[idx]
+        website = row['Website']
+        
+        if pd.isna(website) or str(website).strip() == '':
+            continue
+        
+        logger.info(f"[{idx+1}/{chunk_end}] Processing: {website}")
+        
+        try:
+            result = crawler.crawl_website(str(website))
+            df.at[idx, new_col_name] = result
+            processed_count += 1
+        except Exception as e:
+            logger.error(f"Error processing row {idx}: {e}")
+            df.at[idx, new_col_name] = "error"
+        
+        # Save checkpoint every 50 rows
+        if (idx + 1) % 50 == 0:
+            checkpoint_data = {
+                'last_processed_idx': idx,
+                'processed_count': processed_count,
+                'timestamp': datetime.now().isoformat()
+            }
+            checkpoint_mgr.save(file_hash, checkpoint_data, chunk_num)
+            elapsed = (time.time() - chunk_start_time) / 60
+            remaining = chunk_end - idx - 1
+            if processed_count > 0 and elapsed > 0:
+                rate = (idx - start_idx + 1) / elapsed
+                eta = remaining / rate if rate > 0 else 0
+                print(f"💾 Checkpoint saved. ETA: {eta:.0f} minutes remaining\n")
+    
+    # Save chunk results
+    chunk_file = os.path.join(OUTPUT_DIR, f"npi_with_keywords_chunk{chunk_num}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
+    df.to_csv(chunk_file, index=False)
+    all_chunk_files.append(chunk_file)
+    
+    checkpoint_mgr.delete(file_hash, chunk_num)
+    
+    chunk_time = (time.time() - chunk_start_time) / 3600
+    print(f"\n✅ Chunk {chunk_num} complete in {chunk_time:.2f} hours")
+    print(f"   📁 Saved to: {os.path.basename(chunk_file)}\n")
+
+# Merge all chunks
+print(f"\n{'─'*80}")
+print(f"🔀 MERGING ALL CHUNKS")
+print(f"{'─'*80}\n")
+
+chunk_files = sorted(glob.glob(os.path.join(OUTPUT_DIR, "npi_with_keywords_chunk*.csv")))
+
+if chunk_files:
+    print(f"Found {len(chunk_files)} chunk files:")
+    dfs = []
+    for chunk_file in chunk_files:
+        df_chunk = pd.read_csv(chunk_file)
+        dfs.append(df_chunk)
+        print(f"  ✅ {os.path.basename(chunk_file)} ({len(df_chunk)} rows)")
+    
+    df_merged = pd.concat(dfs, ignore_index=True)
+    df_merged = df_merged.drop_duplicates(subset=['NPI'], keep='first')
+    
+    merged_file = os.path.join(OUTPUT_DIR, f"npi_with_keywords_FINAL_MERGED_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
+    df_merged.to_csv(merged_file, index=False)
+    
+    print(f"\n✅ Merged into final file:")
+    print(f"   📁 {os.path.basename(merged_file)}")
+    print(f"   📊 Total rows: {len(df_merged)}")
+
+# Final summary
+overall_time = (time.time() - overall_start) / 3600
+
+print(f"\n" + "█"*80)
+print(f"🎉 ALL PROCESSING COMPLETE!")
+print(f"█"*80)
+print(f"\n📊 FINAL SUMMARY:")
+print(f"  • Total time: {overall_time:.2f} hours")
+print(f"  • Records processed: {total_rows}")
+print(f"  • Output directory: {OUTPUT_DIR}")
+print(f"  • Final file: npi_with_keywords_FINAL_MERGED_*.csv")
+print(f"\n" + "█"*80 + "\n")
+
+print("✅ DONE! Check your output directory for results.")
