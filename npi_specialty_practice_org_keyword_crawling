@@ -6,6 +6,11 @@ The script will be run by chunk sequentially
 
 MAIN SCRIPT STARTS BELOW THIS LINE
 ---
+"""
+NPI Keyword Crawler - With Relevance-Based Link Strategy
+Using the same relevance filtering from your original script
+"""
+
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
@@ -21,7 +26,7 @@ from typing import Set, List, Dict, Optional, Tuple
 # CONFIGURATION - EDIT THESE PATHS ONLY
 # ============================================================================
 INPUT_FILE = r"C:\Users\Yueming Zhao\Desktop\Multidisciplinary IEP-Related Evaluations\NPI\npi_specialty_practice_multi_specialty_with_websites_manually_checked.csv"
-OUTPUT_DIR = r"C:\Users\Yueming Zhao\Desktop\Multidisciplinary IEP-Related Evaluations\NPI\Results"
+OUTPUT_DIR = r"C:\Users\Yueming Zhao\Desktop\Multidisciplinary IEP-Related Evaluations\NPI\npi_specialty_practice_keyword_crawling_results"
 CHUNK_SIZE = 200  # Process 200 records per chunk
 # ============================================================================
 
