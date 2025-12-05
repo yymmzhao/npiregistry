@@ -6,10 +6,6 @@ The script will be run by chunk sequentially
 
 MAIN SCRIPT STARTS BELOW THIS LINE
 ---
-NPI Keyword Crawler - Ultra Simple Version
-Just paste this in ONE cell and click RUN - that's it!
-"""
-
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
@@ -20,7 +16,6 @@ from datetime import datetime
 import json
 import os
 from typing import Set, List, Dict, Optional, Tuple
-import glob
 
 # ============================================================================
 # CONFIGURATION - EDIT THESE PATHS ONLY
@@ -76,10 +71,27 @@ class CheckpointManager:
 
 
 class KeywordCrawler:
+    """Crawler with relevance-based link filtering strategy"""
+    
     KEYWORDS = [
         "IEP", "Individualized Education Program", "IEPs",
         "Impartial Hearing", "Impartial Hearings",
         "School Observation", "School Observations"
+    ]
+    
+    # Keywords for filtering relevant pages
+    RELEVANT_KEYWORDS = [
+        'education', 'special', 'iep', 'individualized', 'student', 'school',
+        'academic', 'learning', 'disability', 'support', 'service', 'therapy',
+        'evaluation', 'assessment', 'program', 'plan', 'resource', 'help',
+        'child', 'pediatric', 'development', 'behavioral', 'speech', 'language',
+        'autism', 'adhd', 'curriculum', 'intervention', 'accommodation', 'impartial',
+        'hearing', 'observation', 'services', 'programs', 'about', 'contact'
+    ]
+    
+    IRRELEVANT_KEYWORDS = [
+        'login', 'admin', 'register', 'cart', 'shop', 'buy', 'donate',
+        'privacy', 'terms', 'cookie', 'disclaimer', 'legal'
     ]
     
     def __init__(self):
@@ -93,12 +105,14 @@ class KeywordCrawler:
         self.domain_access_count = {}
     
     def extract_domain(self, url):
+        """Extract domain from URL"""
         try:
             return urlparse(url).netloc.lower()
         except:
             return ""
     
     def fetch_page(self, url):
+        """Fetch a page"""
         try:
             response = self.session.get(url, timeout=10)
             response.raise_for_status()
@@ -107,6 +121,7 @@ class KeywordCrawler:
             return None, False
     
     def extract_text(self, soup):
+        """Extract readable text from page"""
         try:
             for script in soup(["script", "style"]):
                 script.decompose()
@@ -118,6 +133,7 @@ class KeywordCrawler:
             return ""
     
     def find_keywords(self, text):
+        """Find keywords on page"""
         found = []
         text_lower = text.lower()
         for keyword in self.KEYWORDS:
@@ -125,19 +141,45 @@ class KeywordCrawler:
                 found.append(keyword)
         return found
     
+    def is_relevant_link(self, url, link_text=""):
+        """
+        Check if a URL is relevant to IEP/education content.
+        Uses keyword matching strategy from original script.
+        """
+        combined_text = (url + " " + link_text).lower()
+        
+        # Count relevant keywords
+        keyword_count = sum(1 for keyword in self.RELEVANT_KEYWORDS if keyword in combined_text)
+        
+        # Check if page is irrelevant
+        is_irrelevant = any(term in combined_text for term in self.IRRELEVANT_KEYWORDS)
+        
+        # Consider relevant if has keywords and not irrelevant
+        is_relevant = (keyword_count > 0) and not is_irrelevant
+        
+        return is_relevant
+    
     def get_links(self, soup, base_url):
+        """Extract and filter relevant links from page"""
         links = set()
         try:
             for link in soup.find_all('a', href=True):
                 url = link['href']
+                link_text = link.get_text(strip=True)
                 absolute_url = urljoin(base_url, url)
+                
                 if absolute_url.startswith(('http://', 'https://')):
-                    links.add(absolute_url.split('#')[0])
+                    clean_url = absolute_url.split('#')[0]
+                    
+                    # Filter by relevance (uses relevance strategy)
+                    if self.is_relevant_link(clean_url, link_text):
+                        links.add(clean_url)
         except:
             pass
         return links
     
     def crawl_website(self, website_url):
+        """Crawl website using relevance-based link strategy"""
         try:
             domain = self.extract_domain(website_url)
             
@@ -153,7 +195,7 @@ class KeywordCrawler:
             
             to_visit = [website_url]
             
-            # Phase 1: Same domain pages
+            # Phase 1: Crawl relevant same domain pages
             same_domain_count = 0
             while to_visit and same_domain_count < 20:
                 current_url = to_visit.pop(0)
@@ -181,6 +223,7 @@ class KeywordCrawler:
                             self.global_found_results[domain][keyword] = set()
                         self.global_found_results[domain][keyword].add(current_url)
                 
+                # Get RELEVANT links only (using relevance strategy)
                 new_links = self.get_links(soup, current_url)
                 self.global_all_links[domain].update(new_links)
                 
@@ -190,7 +233,7 @@ class KeywordCrawler:
                 
                 time.sleep(0.5)
             
-            # Phase 2: External pages (only first access)
+            # Phase 2: External relevant pages (only first access)
             if access_number == 1 and self.global_all_links[domain]:
                 external_links = [link for link in self.global_all_links[domain] 
                                  if self.extract_domain(link) != domain]
@@ -244,7 +287,7 @@ class KeywordCrawler:
 # ============================================================================
 
 print("\n" + "█"*80)
-print("🚀 NPI KEYWORD CRAWLER - STARTING AUTOMATED PROCESSING")
+print("🚀 NPI KEYWORD CRAWLER - RELEVANCE-BASED STRATEGY")
 print("█"*80 + "\n")
 
 checkpoint_mgr = CheckpointManager()
@@ -273,11 +316,11 @@ print(f"📊 CONFIGURATION:")
 print(f"  • Total records: {total_rows}")
 print(f"  • Chunk size: {CHUNK_SIZE} records/chunk")
 print(f"  • Total chunks: {num_chunks}")
+print(f"  • Link filtering: RELEVANCE-BASED (from original strategy)")
 print(f"\n" + "█"*80 + "\n")
 
 crawler = KeywordCrawler()
 overall_start = time.time()
-all_chunk_files = []
 
 # Process each chunk
 for chunk_num in range(1, num_chunks + 1):
@@ -336,7 +379,6 @@ for chunk_num in range(1, num_chunks + 1):
     # Save chunk results
     chunk_file = os.path.join(OUTPUT_DIR, f"npi_with_keywords_chunk{chunk_num}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
     df.to_csv(chunk_file, index=False)
-    all_chunk_files.append(chunk_file)
     
     checkpoint_mgr.delete(file_hash, chunk_num)
     
@@ -349,6 +391,7 @@ print(f"\n{'─'*80}")
 print(f"🔀 MERGING ALL CHUNKS")
 print(f"{'─'*80}\n")
 
+import glob
 chunk_files = sorted(glob.glob(os.path.join(OUTPUT_DIR, "npi_with_keywords_chunk*.csv")))
 
 if chunk_files:
@@ -379,6 +422,7 @@ print(f"\n📊 FINAL SUMMARY:")
 print(f"  • Total time: {overall_time:.2f} hours")
 print(f"  • Records processed: {total_rows}")
 print(f"  • Output directory: {OUTPUT_DIR}")
+print(f"  • Strategy: RELEVANCE-BASED LINK FILTERING")
 print(f"  • Final file: npi_with_keywords_FINAL_MERGED_*.csv")
 print(f"\n" + "█"*80 + "\n")
 
