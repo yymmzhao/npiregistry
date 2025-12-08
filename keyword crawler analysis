@@ -1,0 +1,26 @@
+Input file: C:/Users/Yueming Zhao/Desktop/Multidisciplinary IEP-Related Evaluations/NPI/npi_with_keywords_chunk5_20251205_180912.csv
+
+Sheet 1:
+1. Calculate how many providers there are, how many have websites, and how many have the target keywords
+2. Among those who have keywords, which keywords they have, and how many pages are identified with each keyword, and how many are "not found" 
+3. 
+
+Sheet 2: 
+- Column "Provider Name" is from the input file column "Provider Organization Name (Legal Business Name)"
+- Column "NPI" is from the input file column "NPI"
+- Column "Multidisciplinary Capability" is from the input file column "Multidisciplinary Capability"
+- Column "Taxonomy" is from the input file column "Taxonomy"
+- Column "Evaluation Services" is from the input file column "Evaluation Services"
+- Column "Keyword: IEP, IEPs, Individualized Education Program", shows the actual link corresponding to these keywords from the input file. Only show one link in one cell; if there are multiple links towards one keyword, show them in multiple rows with the same organization name info
+- Column "Keyword: Impartial Hearing, Impartial Hearings. Do the same thing as the IEP keyword
+- Column "Keyword: School Observation, School Observations". Do the same thing as the IEP keyword.
+
+note: There should be actual link under the columns Keyword: IEP, IEPs, Individualized Education Program, Keyword: Impartial Hearing, Impartial Hearings and Keyword: School Observation, School Observations. In the input file, the links are in the same cell. I also attached the input file here for your reference.
+For example, IEP: https://www.chchearing.org/patient-forms | Individualized Education Program: https://www.chchearing.org/patient-forms
+
+And in the process file, it should 1) separate these records, corresponding to the keyword before each link, 2) make it only one link each cell, with the corresponding keyword before it, 3) and also to different columns depending on which keywords are assigned to that column. 
+
+- Column "Contextual Wording Extracted", on the link when there is a keyword, shows the whole paragraph where they use this keyword. You should not put the links in the column "Contextual Wording Extracted". In the column, you open the link in that row, and find that keyword on that page, and copy and paste the whole paragraph on that page to the cell in the column
+
+For those who don't have value in the column "Keywords crawling: IEP, impartial hearing, and school observation", or the value is "not found", just skip the records
+Provide Python script for Jupyter
